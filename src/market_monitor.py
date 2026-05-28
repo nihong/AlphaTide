@@ -142,7 +142,7 @@ class MarketMonitor:
                 content += f"- **量化评分**: {rec['reason']}\n"
                 content += f"#### 🧠 AI 深度点评:\n{rec['ai_insight']}\n\n"
         
-        content += "\n---\n*本报告由 RGChooseStock 自动化系统生成，仅供参考。风险自担。*"
+        content += "\n---\n*本报告由 AlphaTide 自动化系统生成，仅供参考。风险自担。*"
         
         with open(filename, 'w') as f:
             f.write(content)

@@ -1,6 +1,6 @@
-# RGChooseStock: AI 驱动的“10倍股”自动搜寻哨兵
+# AlphaTide: AI 驱动的“10倍股”自动搜寻哨兵
 
-RGChooseStock 是一个全自动化的 AI 投资决策支持系统，专门设计用于在 A 股和港股市场中寻找具备“10倍股”潜力的优质标的。它结合了深度基本面筛选、市场轮动预测、技术面验证以及大模型（DeepSeek）的自动化点评。
+AlphaTide 是一个全自动化的 AI 投资决策支持系统，专门设计用于在 A 股和港股市场中寻找具备“10倍股”潜力的优质标的。它结合了深度基本面筛选、市场轮动预测、技术面验证以及大模型（DeepSeek）的自动化点评。
 
 ## 🌟 核心功能
 
@@ -40,8 +40,8 @@ RGChooseStock 是一个全自动化的 AI 投资决策支持系统，专门设�
 
 ### 1. 环境准备
 ```bash
-git clone https://github.com/nihong/RGChooseStock.git
-cd RGChooseStock
+git clone https://github.com/nihong/AlphaTide.git
+cd AlphaTide
 pip install -r requirements.txt
 ```
 
@@ -62,7 +62,7 @@ python3 main.py --auto
 - **定时触发**：建议设置在每个交易日 16:00 运行。
 - **消息推送**：可配置 Webhook 将 `reports/` 下生成的每日决策日报推送至飞书、钉钉或微信。
 - **本地备份**：也可通过 macOS/Linux 的 `crontab` 设置：
-  `0 16 * * 1-5 cd /你的路径/RGChooseStock && /usr/bin/python3 main.py --auto`
+  `0 16 * * 1-5 cd /你的路径/AlphaTide && /usr/bin/python3 main.py --auto`
 
 ## 🔐 安全声明
 - 本项目严禁在代码中硬编码任何 API 密钥。

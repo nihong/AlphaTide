@@ -10,7 +10,7 @@ from src.screener import Screener
 from src.ai_analyst import AIAnalyst
 
 def main():
-    parser = argparse.ArgumentParser(description="RGChooseStock: AI Investment Pipeline")
+    parser = argparse.ArgumentParser(description="AlphaTide: AI Investment Pipeline")
     parser.add_argument("--market", type=str, default="A", choices=["A", "HK"], help="Market to screen (A or HK)")
     parser.add_argument("--symbol", type=str, help="Specific stock symbol to analyze")
     parser.add_argument("--auto", action="store_true", help="Run the full automated daily monitoring pipeline")
