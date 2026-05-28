@@ -1,0 +1,6 @@
+akshare
+pandas
+requests
+openpyxl
+lxml
+python-dotenv
