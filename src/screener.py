@@ -4,8 +4,8 @@ import akshare as ak
 
 class Screener:
     def __init__(self):
-        # Basic "10-bagger" criteria
-        self.min_roe = 15.0
+        # 基础筛选条件 (放宽ROE要求，交由AI深度判断困境反转)
+        self.min_roe = 8.0
         self.min_growth = 20.0
         self.max_debt_ratio = 50.0
         self.min_cash_profit_ratio = 1.0

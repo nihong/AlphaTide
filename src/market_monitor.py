@@ -19,18 +19,31 @@ class MarketMonitor:
         self.risk = RiskManager()
 
     def check_market_light(self):
-        """红绿灯系统：根据沪深300指数判断市场环境"""
+        """红绿灯系统：根据沪深300指数的量价关系判断市场环境并输出仓位建议"""
         # 使用沪深300 sh000300
         df = fetch_market_index("sh000300")
-        if df is None or df.empty: return "YELLOW", "数据获取失败"
+        if df is None or df.empty: return "YELLOW", "数据获取失败，默认建议仓位: 30%"
         
         latest_price = df.iloc[-1]['close']
         ma20 = df.iloc[-20:]['close'].mean()
         
-        if latest_price > ma20:
-            return "GREEN", f"多头环境 (沪深300处于MA20上方: {round(latest_price, 2)})"
+        latest_vol = df.iloc[-1]['volume']
+        vol_ma5 = df.iloc[-5:]['volume'].mean()
+        
+        # 逻辑判断
+        is_uptrend = latest_price > ma20
+        is_expanding_vol = latest_vol > vol_ma5
+        
+        if is_uptrend:
+            if is_expanding_vol:
+                return "GREEN", f"🟢 多头环境且放量 (价格>MA20, 量>5日均量)，建议重仓 (仓位: 80%)"
+            else:
+                return "YELLOW", f"🟡 多头环境但缩量 (动能不足)，建议观望或轻仓 (仓位: 30%)"
         else:
-            return "RED", f"空头/调整环境 (沪深300处于MA20下方: {round(latest_price, 2)})"
+            if is_expanding_vol:
+                return "RED", f"🔴 空头环境且放量下跌 (价格<MA20, 量>5日均量)，风险极大，建议空仓避险 (仓位: 0%)"
+            else:
+                return "YELLOW", f"🟡 空头环境但缩量下跌 (存在止跌惜售迹象)，建议观望 (仓位: 30%)"
 
     def run_daily_scan(self):
         print(f"[{datetime.now()}] 🚀 启动每日自动哨兵监控...")

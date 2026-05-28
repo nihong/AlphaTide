@@ -7,12 +7,15 @@ class RiskManager:
         self.trend_ma = 20
         # 保守策略（估值/情绪）：乖离率过大或估值过高
         self.bias_threshold = 15.0 # 股价偏离MA20超过15%
+        # 新增：移动止损（最高点回撤）策略
+        self.trailing_stop_threshold = 10.0 # 从近期最高点回撤超过10%无条件止损
+        self.lookback_days = 60 # 计算最高点的回溯天数
 
     def evaluate_exit_signals(self, symbol, current_price=None):
         """
         评估卖出信号
         Returns: (signals, description)
-        signals: List of triggered signal types ["Aggressive", "Conservative"]
+        signals: List of triggered signal types ["Aggressive", "Conservative", "TrailingStop"]
         """
         try:
             df = ak.stock_zh_a_hist(symbol=symbol, period="daily", adjust="qfq")
@@ -22,8 +25,19 @@ class RiskManager:
             close = latest['收盘']
             ma20 = df.iloc[-20:]['收盘'].mean()
             
+            # 计算近期最高价与当前回撤
+            lookback_df = df.iloc[-self.lookback_days:] if len(df) >= self.lookback_days else df
+            recent_high = lookback_df['最高'].max()
+            drawdown = ((recent_high - close) / recent_high) * 100
+            
             triggered_signals = []
             descriptions = []
+
+            # 0. 绝对止损点：高位回撤 (Trailing Stop)
+            # 逻辑：无论均线状态如何，只要从近期高点回撤超过设定阈值，立即触发生存防线。
+            if drawdown > self.trailing_stop_threshold:
+                triggered_signals.append("TrailingStop")
+                descriptions.append(f"⚫ 【绝对止损-高位回撤】：股价({close})已从近期高点({recent_high})回撤 {round(drawdown, 2)}%，超过设定的 {self.trailing_stop_threshold}% 红线，建议无条件止损/止盈。")
 
             # 1. 激进卖点：趋势破坏 (Aggressive - Trend Break)
             # 逻辑：只要价格跌破20日线，说明短期上升趋势终结，必须离场。
