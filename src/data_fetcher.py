@@ -52,6 +52,15 @@ def fetch_hk_market_index(symbol="HSI"):
     """获取港股大盘指数数据(恒生指数)，带短期缓存(4小时)"""
     return fetch_with_cache(f"hk_index_{symbol}", ak.stock_hk_index_daily_sina, expiry_hours=4, symbol=symbol)
 
+def fetch_us_index(symbol=".IXIC"):
+    """获取美股指数数据 (.IXIC 纳指, .SOX 半导体)，带短期缓存(4小时)"""
+    return fetch_with_cache(f"us_index_{symbol}", ak.index_us_stock_sina, expiry_hours=4, symbol=symbol)
+
+def fetch_fx_spot():
+    """获取汇率实时数据，带短期缓存(1小时)"""
+    return fetch_with_cache("fx_spot", ak.fx_spot_quote, expiry_hours=1)
+
+
 def fetch_market_tide():
     """获取行业资金流向数据"""
     return fetch_with_cache("market_tide", ak.stock_sector_fund_flow_rank, expiry_hours=4, indicator="5日")

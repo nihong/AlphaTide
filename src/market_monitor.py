@@ -8,8 +8,10 @@ from src.rotation_predictor import RotationPredictor
 from src.screener import Screener
 from src.history_manager import HistoryManager
 from src.ai_analyst import AIAnalyst
-from src.risk_manager import RiskManager
 from src.sentiment_engine import SentimentEngine
+from src.risk_manager import RiskManager
+from src.macro_engine import MacroEngine
+
 
 class MarketMonitor:
     def __init__(self):
@@ -19,6 +21,8 @@ class MarketMonitor:
         self.analyst = AIAnalyst()
         self.risk = RiskManager()
         self.sentiment = SentimentEngine()
+        self.macro = MacroEngine()
+
 
     def check_market_light(self, target_date=None):
         """红绿灯系统：根据沪深300指数的量价关系判断市场环境并输出仓位建议"""
@@ -157,6 +161,13 @@ class MarketMonitor:
         run_time = target_date if target_date else datetime.now().strftime('%Y-%m-%d')
         print(f"[{run_time}] 🚀 启动 [A股] 自动哨兵监控" + (" (历史回测模式)..." if target_date else "..."))
         
+        # 0. 全球宏观环境监控 (方案 A)
+        macro_status = None
+        if not target_date:
+            macro_status = self.macro.get_global_status()
+            print(f"🌍 全球宏观天气: {macro_status['weather']}")
+
+        
         # 0. 环境检查
         if not os.path.exists(".env"):
             print("⚠️ 警告: 根目录未发现 .env 文件，AI 点评功能将无法完整运行。请参考 .env.example 配置。")
@@ -283,9 +294,10 @@ class MarketMonitor:
         recommendations.sort(key=lambda x: x['resonance_count'], reverse=True)
 
         # 5. 生成报告
-        self._generate_final_report(recommendations, light, light_msg, sell_warnings, target_date, market=market, sentiment_data=market_temperature)
+        self._generate_final_report(recommendations, light, light_msg, sell_warnings, target_date, market=market, sentiment_data=market_temperature, macro_data=macro_status)
 
-    def _generate_final_report(self, recommendations, light, light_msg, sell_warnings, target_date=None, market="A", sentiment_data=None):
+
+    def _generate_final_report(self, recommendations, light, light_msg, sell_warnings, target_date=None, market="A", sentiment_data=None, macro_data=None):
         report_dir = "reports"
         os.makedirs(report_dir, exist_ok=True)
         report_date = target_date.replace("-", "") if target_date else datetime.now().strftime('%Y%m%d')
@@ -295,7 +307,16 @@ class MarketMonitor:
         filename = f"{report_dir}/daily_decision_{market}_{report_date}.md"
         
         content = f"# AlphaTide [{market_str}] 决策日报 (时间: {display_date})\n\n"
+        
+        if macro_data:
+            content += f"## 🌍 全球宏观视野\n"
+            content += f"- **宏观天气**: {macro_data['weather']}\n"
+            content += f"- **纳斯达克**: {macro_data['nasdaq']['price']} ({macro_data['nasdaq']['desc']})\n"
+            content += f"- **半导体指数**: {macro_data['sox']['price']} ({macro_data['sox']['desc']})\n"
+            content += f"- **离岸汇率**: {macro_data['usdcny']['price']} ({macro_data['usdcny']['desc']})\n\n"
+
         content += f"## 🚦 市场环境监控\n"
+
         content += f"- **当前红绿灯**: {light}\n"
         content += f"- **状态描述**: {light_msg}\n\n"
         
