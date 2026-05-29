@@ -5,7 +5,7 @@ import akshare as ak
 class Screener:
     def __init__(self):
         # 基础筛选条件 (放宽ROE要求，交由AI深度判断困境反转)
-        self.min_roe = 8.0
+        self.min_roe = 10.0
         self.min_growth = 20.0
         self.max_debt_ratio = 50.0
         self.min_cash_profit_ratio = 1.0
@@ -60,13 +60,15 @@ class Screener:
         except:
             return None
 
-    def screen_a_share(self, df):
+    def screen_a_share(self, df, min_roe=None):
         """
         Screen A-share based on abstract data.
         Indicators: ROE, Growth, Cash-to-Profit Ratio.
         """
         if df is None or df.empty:
             return False, "无数据"
+        
+        target_roe = min_roe if min_roe is not None else self.min_roe
         
         try:
             # Transpose for easier row access by indicator name
@@ -147,10 +149,12 @@ class Screener:
         except:
             return False, "技术面分析失败"
 
-    def screen_hk_share(self, df):
+    def screen_hk_share(self, df, min_roe=None):
         """Screen HK stock based on indicators."""
         if df is None or df.empty:
             return False, "无数据"
+        
+        target_roe = min_roe if min_roe is not None else 10.0
         
         try:
             latest = df.iloc[0]
@@ -168,11 +172,11 @@ class Screener:
             passed = True
             
             # 港股因为高分红、稳健特性，ROE要求可以略微放宽
-            if latest_roe > 10.0:
+            if latest_roe > target_roe:
                 reasons.append(f"ROE: {latest_roe}%")
             else:
                 passed = False
-                reasons.append(f"ROE不达标: {latest_roe}%")
+                reasons.append(f"ROE不达标: {latest_roe}% (目标 >{target_roe}%)")
                 
             if latest_growth > 0:
                 reasons.append(f"利润正增长: {latest_growth}%")

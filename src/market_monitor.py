@@ -254,8 +254,11 @@ class MarketMonitor:
                 rs_score = self.risk.get_rs_rating(symbol, target_date=target_date)
                 if rs_score < 0: continue
                 
+                # 策略改进：潜伏蓄势板块放宽ROE到5%以寻找困境反转；热门板块维持10%
+                target_roe = 5.0 if sector_type == '潜伏蓄势' else 10.0
+                
                 financials = fetch_a_stock_financials(symbol)
-                f_pass, f_detail = self.screener.screen_a_share(financials)
+                f_pass, f_detail = self.screener.screen_a_share(financials, min_roe=target_roe)
                 
                 if f_pass:
                     t_pass, t_detail = self.screener.screen_technical(symbol, target_date=target_date)
