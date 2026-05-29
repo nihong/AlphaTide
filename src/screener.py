@@ -12,22 +12,30 @@ class Screener:
 
     def screen_technical(self, symbol):
         """
-        Simple Technical Screen:
-        1. Price > MA20 (Short-term trend)
-        2. Volume is not drying up
+        Technical Screen with Whipsaw & Liquidity Filters:
+        1. Liquidity: 5-day avg turnover > 100M RMB (Avoid slippage)
+        2. Trend: Price > MA20 & MA20 is pointing up (Avoid chops)
         """
         try:
-            # Note: For speed in a full-market scan, we might use spot data
-            # But for a specific pick, we use historical
             df = ak.stock_zh_a_hist(symbol=symbol, period="daily", adjust="qfq")
             if df.empty or len(df) < 30: return False, "数据不足"
             
+            # 流动性过滤：近5日平均成交额大于1亿
+            avg_turnover_5d = df.iloc[-5:]['成交额'].mean()
+            if avg_turnover_5d < 100_000_000:
+                return False, f"流动性不足 (日均成交<1亿)"
+
             latest_price = df.iloc[-1]['收盘']
             ma20 = df.iloc[-20:]['收盘'].mean()
+            ma20_5d_ago = df.iloc[-25:-5]['收盘'].mean()
             
-            if latest_price > ma20:
-                return True, f"股价处于MA20上方 ({round(latest_price,2)} > {round(ma20,2)})"
-            return False, f"处于MA20下方 (趋势偏弱)"
+            # 趋势过滤：不仅价格要在MA20之上，且MA20本身必须是向上的（过滤横盘震荡）
+            if latest_price > ma20 and ma20 > ma20_5d_ago:
+                return True, f"均线多头且流动性充沛 (成交额>1亿)"
+            elif latest_price > ma20 and ma20 <= ma20_5d_ago:
+                return False, "处于震荡市 (MA20走平或向下)"
+            else:
+                return False, f"处于MA20下方 (趋势偏弱)"
         except:
             return False, "技术面分析失败"
 

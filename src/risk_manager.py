@@ -73,3 +73,42 @@ class RiskManager:
             return rs_score
         except:
             return 0
+
+    def calculate_position_size(self, symbol, risk_per_trade=0.02, max_position=0.20):
+        """
+        基于 ATR (平均真实波幅) 计算科学仓位
+        risk_per_trade: 单笔交易愿意承担的总资金风险比例 (默认 2%)
+        max_position: 单只个股绝对仓位上限 (默认 20%)
+        Returns: 建议仓位比例 (如 0.15 表示建议动用总资金的 15%)
+        """
+        try:
+            df = ak.stock_zh_a_hist(symbol=symbol, period="daily", adjust="qfq")
+            if df.empty or len(df) < 15: return max_position
+            
+            df = df.iloc[-15:].copy()
+            df['prev_close'] = df['收盘'].shift(1)
+            
+            # 计算 True Range (TR)
+            df['tr1'] = df['最高'] - df['最低']
+            df['tr2'] = (df['最高'] - df['prev_close']).abs()
+            df['tr3'] = (df['最低'] - df['prev_close']).abs()
+            df['TR'] = df[['tr1', 'tr2', 'tr3']].max(axis=1)
+            
+            # 计算 ATR (14日均值)
+            atr = df['TR'].iloc[-14:].mean()
+            latest_close = df.iloc[-1]['收盘']
+            
+            # 如果没有波动（极少见），返回上限
+            if atr == 0: return max_position
+            
+            # 计算止损幅度比例 (将 1.5 倍 ATR 设为止损点)
+            stop_loss_pct = (atr * 1.5) / latest_close
+            
+            # 建议仓位 = 愿意承担的风险 / 止损幅度
+            position_size = risk_per_trade / stop_loss_pct
+            
+            # 限制最高仓位
+            return min(position_size, max_position)
+            
+        except Exception as e:
+            return max_position # 计算失败时回退到默认单票上限

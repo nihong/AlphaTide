@@ -105,10 +105,14 @@ class MarketMonitor:
                 f_pass, f_detail = self.screener.screen_a_share(financials)
                 
                 if f_pass:
-                    # 3. 技术面体检
+                    # 3. 技术面体检 (包含流动性与震荡过滤)
                     t_pass, t_detail = self.screener.screen_technical(symbol)
                     if t_pass:
                         print(f"✨ 发现优质标的: {name} ({symbol}) | RS强度: {round(rs_score, 2)}")
+                        
+                        # 4. 计算建议仓位 (基于ATR波动率)
+                        suggested_pos = self.risk.calculate_position_size(symbol)
+                        pos_str = f"{round(suggested_pos * 100, 1)}%"
                         
                         # D. 获取 AI 深度分析
                         prompt = self.analyst.generate_report_prompt(symbol, "A", financials, (f_pass, f_detail))
@@ -119,6 +123,7 @@ class MarketMonitor:
                             "symbol": symbol,
                             "sector": sector_name,
                             "reason": f"{f_detail} | {t_detail} | RS强度: {round(rs_score, 2)}",
+                            "position": pos_str,
                             "ai_insight": ai_insight
                         })
 
@@ -152,6 +157,7 @@ class MarketMonitor:
             for rec in recommendations:
                 content += f"### {rec['name']} ({rec['symbol']})\n"
                 content += f"- **所属板块**: {rec['sector']}\n"
+                content += f"- **科学仓位建议**: 建议买入总资金的 **{rec['position']}** (基于 ATR 波动风险平权)\n"
                 content += f"- **量化评分**: {rec['reason']}\n"
                 content += f"#### 🧠 AI 深度点评:\n{rec['ai_insight']}\n\n"
         
