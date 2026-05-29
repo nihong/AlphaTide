@@ -8,8 +8,8 @@ from src.rotation_predictor import RotationPredictor
 from src.screener import Screener
 from src.history_manager import HistoryManager
 from src.ai_analyst import AIAnalyst
-
 from src.risk_manager import RiskManager
+from src.sentiment_engine import SentimentEngine
 
 class MarketMonitor:
     def __init__(self):
@@ -18,6 +18,7 @@ class MarketMonitor:
         self.history = HistoryManager()
         self.analyst = AIAnalyst()
         self.risk = RiskManager()
+        self.sentiment = SentimentEngine()
 
     def check_market_light(self, target_date=None):
         """红绿灯系统：根据沪深300指数的量价关系判断市场环境并输出仓位建议"""
@@ -165,11 +166,16 @@ class MarketMonitor:
         print(f"🚦 大盘红绿灯: {light} - {light_msg}")
         
         if light == "RED":
-            self._generate_final_report([], light, light_msg, [], target_date)
+            self._generate_final_report([], light, light_msg, [], target_date, market=market)
             print("🛑 市场风险较大，已生成风险预警报告，停止进一步扫描。")
             return
 
-        # 1. 双核引擎识别蓄势与热门板块
+        # 1. 舆情热点探测 (降维打击：感知市场体温)
+        market_temperature = []
+        if not target_date and market == "A": 
+            market_temperature = self.sentiment.get_hot_sectors_with_news(top_n=5)
+
+        # 2. 双核引擎识别蓄势与热门板块
         acc_df, mom_df = self.predictor.predict_sectors()
         
         sectors_to_scan = []
@@ -192,7 +198,7 @@ class MarketMonitor:
 
         if not sectors_to_scan:
             print("⚠️ 未发现明显机会板块，今天建议观望。")
-            self._generate_final_report([], light, light_msg, [], target_date)
+            self._generate_final_report([], light, light_msg, [], target_date, market=market, sentiment_data=market_temperature)
             return
 
         recommendations = []
@@ -201,7 +207,7 @@ class MarketMonitor:
         # 去重与题材共振追踪
         scanned_symbols = {} # {symbol: {data, sectors: []}}
 
-        # 2. 在每个行业内精选个股
+        # 3. 在每个行业内精选个股
         for sector_info in sectors_to_scan:
             sector_name = sector_info['name']
             sector_label = sector_info['label']
@@ -228,25 +234,21 @@ class MarketMonitor:
                 else:
                     scanned_symbols[symbol] = {'name': name, 'sectors': [sector_name]}
                 
-                # A. 卖出信号检查 (仅针对持仓或关注，这里暂作全量展示预警)
+                # A. 卖出信号检查
                 exit_signals, exit_desc = self.risk.evaluate_exit_signals(symbol, target_date=target_date)
                 if exit_signals:
                     sell_warnings.append({"name": name, "symbol": symbol, "desc": exit_desc})
 
-                # B. 买入机会筛选 (三维过滤)
-                # 1. 相对强度检查 (RS)
+                # B. 买入机会筛选
                 rs_score = self.risk.get_rs_rating(symbol, target_date=target_date)
-                if rs_score < 0: continue # 走得比大盘还弱的，不要
+                if rs_score < 0: continue
                 
-                # 2. 财务体检
                 financials = fetch_a_stock_financials(symbol)
                 f_pass, f_detail = self.screener.screen_a_share(financials)
                 
                 if f_pass:
-                    # 3. 技术面体检 (包含流动性与震荡过滤)
                     t_pass, t_detail = self.screener.screen_technical(symbol, target_date=target_date)
                     if t_pass:
-                        # 4. 计算建议仓位 (基于ATR波动率)
                         suggested_pos = self.risk.calculate_position_size(symbol, target_date=target_date)
                         pos_str = f"{round(suggested_pos * 100, 1)}%"
                         
@@ -257,16 +259,14 @@ class MarketMonitor:
                         scanned_symbols[symbol]['pos_str'] = pos_str
                         scanned_symbols[symbol]['financials'] = financials
 
-        # 3. 汇总与共振加分
+        # 4. 汇总与共振加分
         for symbol, data in scanned_symbols.items():
             if data.get('passed'):
-                # 题材共振
                 resonance_str = " | ".join(data['sectors'])
                 resonance_bonus = "🌟 (题材共振)" if len(data['sectors']) > 1 else ""
                 
                 print(f"✨ 发现优质标的: {data['name']} ({symbol}) {resonance_bonus} | RS强度: {round(data['rs_score'], 2)}")
                 
-                # 获取 AI 深度分析
                 prompt = self.analyst.generate_report_prompt(symbol, "A", data['financials'], (True, data['f_detail']))
                 ai_insight = self.analyst.analyze_with_llm(prompt)
                 
@@ -280,13 +280,12 @@ class MarketMonitor:
                     "resonance_count": len(data['sectors'])
                 })
                 
-        # 按题材共振数量排序
         recommendations.sort(key=lambda x: x['resonance_count'], reverse=True)
 
-        # 4. 生成报告
-        self._generate_final_report(recommendations, light, light_msg, sell_warnings, target_date)
+        # 5. 生成报告
+        self._generate_final_report(recommendations, light, light_msg, sell_warnings, target_date, market=market, sentiment_data=market_temperature)
 
-    def _generate_final_report(self, recommendations, light, light_msg, sell_warnings, target_date=None, market="A"):
+    def _generate_final_report(self, recommendations, light, light_msg, sell_warnings, target_date=None, market="A", sentiment_data=None):
         report_dir = "reports"
         os.makedirs(report_dir, exist_ok=True)
         report_date = target_date.replace("-", "") if target_date else datetime.now().strftime('%Y%m%d')
@@ -300,6 +299,14 @@ class MarketMonitor:
         content += f"- **当前红绿灯**: {light}\n"
         content += f"- **状态描述**: {light_msg}\n\n"
         
+        if sentiment_data:
+            content += "## 🌡️ 全市场舆情体温 (AI 实时判读)\n"
+            content += "| 板块名称 | 情绪分 | AI 核心逻辑与参与建议 |\n"
+            content += "| :--- | :--- | :--- |\n"
+            for item in sentiment_data:
+                content += f"| {item['sector']} | **{item['score']}** | {item['summary']} |\n"
+            content += "\n"
+
         if sell_warnings:
             content += "## ⚠️ 卖出风险预警\n"
             for sw in sell_warnings:
