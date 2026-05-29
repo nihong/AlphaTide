@@ -44,7 +44,7 @@
 ## ⏰ 自动化运行 (OpenClaw / QClaw)
 建议将本项目集成至 **OpenClaw** 或 **QClaw** 平台。
 - **使命**：实现无人值守的每日扫描与实时预警推送。
-- **触发逻辑**：交易日 16:00 自动执行 `python3 main.py --auto`。
+- **触发逻辑**：交易日 16:00 自动执行 `python3 main.py --auto` (A股) 或 `python3 main.py --auto --market HK` (港股)。
 - **通知渠道**：通过 QClaw 插件将生成的 Markdown 报告推送至用户移动端。
 ---
 *最后更新: 2026-05-29 | 重点: 杠铃策略重构与题材共振引擎上线*
