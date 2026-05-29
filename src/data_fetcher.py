@@ -48,6 +48,10 @@ def fetch_market_index(symbol="sh000300"):
     """获取大盘指数数据，带短期缓存(4小时)"""
     return fetch_with_cache(f"index_{symbol}", ak.stock_zh_index_daily, expiry_hours=4, symbol=symbol)
 
+def fetch_hk_market_index(symbol="HSI"):
+    """获取港股大盘指数数据(恒生指数)，带短期缓存(4小时)"""
+    return fetch_with_cache(f"hk_index_{symbol}", ak.stock_hk_index_daily_sina, expiry_hours=4, symbol=symbol)
+
 def fetch_market_tide():
     """获取行业资金流向数据"""
     return fetch_with_cache("market_tide", ak.stock_sector_fund_flow_rank, expiry_hours=4, indicator="5日")

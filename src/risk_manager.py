@@ -124,6 +124,94 @@ class RiskManager:
             
             # 限制最高仓位
             return min(position_size, max_position)
+        except Exception as e:
+            return max_position
+            
+    def evaluate_hk_exit_signals(self, symbol, current_price=None, target_date=None):
+        try:
+            df = ak.stock_hk_daily(symbol=symbol, adjust="qfq")
+            if df.empty: return [], "无行情数据"
+            
+            if target_date:
+                df['date'] = pd.to_datetime(df['date'])
+                df = df[df['date'] <= pd.to_datetime(target_date)]
+                if df.empty: return [], "无该日期之前的行情"
+
+            latest = df.iloc[-1]
+            close = latest['close']
+            ma20 = df.iloc[-20:]['close'].mean()
+            
+            lookback_df = df.iloc[-self.lookback_days:] if len(df) >= self.lookback_days else df
+            recent_high = lookback_df['high'].max()
+            drawdown = ((recent_high - close) / recent_high) * 100
+            
+            triggered_signals = []
+            descriptions = []
+
+            if drawdown > self.trailing_stop_threshold:
+                triggered_signals.append("TrailingStop")
+                descriptions.append(f"⚫ 【绝对止损-高位回撤】：股价({close})已从近期高点({recent_high})回撤 {round(drawdown, 2)}%，超过设定的 {self.trailing_stop_threshold}% 红线，建议无条件止损/止盈。")
+
+            if close < ma20:
+                triggered_signals.append("Aggressive")
+                descriptions.append(f"🔴 【激进卖点-趋势破坏】：股价({close}) 已跌破 20日均线({round(ma20, 2)})。")
+
+            bias = ((close - ma20) / ma20) * 100
+            if bias > self.bias_threshold:
+                triggered_signals.append("Conservative")
+                descriptions.append(f"🟡 【保守卖点-情绪过热】：股价偏离均线过远(乖离率 {round(bias, 2)}%)，建议分批减仓。")
+
+            return triggered_signals, "\n".join(descriptions)
+        except Exception as e:
+            return [], f"卖出评估出错: {e}"
+
+    def get_hk_rs_rating(self, symbol, target_date=None):
+        try:
+            df_stock = ak.stock_hk_daily(symbol=symbol, adjust="qfq")
+            df_index = ak.stock_hk_index_daily_sina(symbol="HSI")
+            
+            if target_date:
+                df_stock['date'] = pd.to_datetime(df_stock['date'])
+                df_stock = df_stock[df_stock['date'] <= pd.to_datetime(target_date)]
+                df_index['date'] = pd.to_datetime(df_index['date'])
+                df_index = df_index[df_index['date'] <= pd.to_datetime(target_date)]
+
+            df_stock = df_stock.iloc[-20:]
+            df_index = df_index.iloc[-20:]
+            
+            stock_perf = (df_stock.iloc[-1]['close'] - df_stock.iloc[0]['close']) / df_stock.iloc[0]['close']
+            index_perf = (df_index.iloc[-1]['close'] - df_index.iloc[0]['close']) / df_index.iloc[0]['close']
+            
+            return stock_perf - index_perf
+        except:
+            return 0
+
+    def calculate_hk_position_size(self, symbol, risk_per_trade=0.02, max_position=0.20, target_date=None):
+        try:
+            df = ak.stock_hk_daily(symbol=symbol, adjust="qfq")
+            if target_date:
+                df['date'] = pd.to_datetime(df['date'])
+                df = df[df['date'] <= pd.to_datetime(target_date)]
+
+            if df.empty or len(df) < 15: return max_position
+            
+            df = df.iloc[-15:].copy()
+            df['prev_close'] = df['close'].shift(1)
+            
+            df['tr1'] = df['high'] - df['low']
+            df['tr2'] = (df['high'] - df['prev_close']).abs()
+            df['tr3'] = (df['low'] - df['prev_close']).abs()
+            df['TR'] = df[['tr1', 'tr2', 'tr3']].max(axis=1)
+            
+            atr = df['TR'].iloc[-14:].mean()
+            latest_close = df.iloc[-1]['close']
+            
+            if atr == 0: return max_position
+            
+            stop_loss_pct = (atr * 1.5) / latest_close
+            position_size = risk_per_trade / stop_loss_pct
+            
+            return min(position_size, max_position)
             
         except Exception as e:
-            return max_position # 计算失败时回退到默认单票上限
+            return max_position

@@ -20,7 +20,7 @@ def main():
     if args.auto:
         from src.market_monitor import MarketMonitor
         monitor = MarketMonitor()
-        monitor.run_daily_scan(target_date=args.date)
+        monitor.run_daily_scan(target_date=args.date, market=args.market)
         return
 
     market = args.market

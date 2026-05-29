@@ -114,6 +114,39 @@ class Screener:
         except Exception as e:
             return False, f"筛选出错: {e}"
 
+    def screen_hk_technical(self, symbol, target_date=None):
+        """
+        HK Technical Screen:
+        1. Liquidity: 5-day avg turnover > 50M HKD
+        2. Trend: Price > MA20 & MA20 is pointing up
+        """
+        try:
+            # 使用新浪接口防止被封
+            df = ak.stock_hk_daily(symbol=symbol, adjust="qfq")
+            
+            if target_date:
+                df['date'] = pd.to_datetime(df['date'])
+                df = df[df['date'] <= pd.to_datetime(target_date)]
+
+            if df.empty or len(df) < 30: return False, "数据不足"
+            
+            avg_turnover_5d = df.iloc[-5:]['amount'].mean()
+            if avg_turnover_5d < 50_000_000:
+                return False, f"流动性不足 (日均成交<5000万港币)"
+
+            latest_price = df.iloc[-1]['close']
+            ma20 = df.iloc[-20:]['close'].mean()
+            ma20_5d_ago = df.iloc[-25:-5]['close'].mean()
+            
+            if latest_price > ma20 and ma20 > ma20_5d_ago:
+                return True, f"均线多头且流动性充沛 (成交额>5000万)"
+            elif latest_price > ma20 and ma20 <= ma20_5d_ago:
+                return False, "处于震荡市 (MA20走平或向下)"
+            else:
+                return False, f"处于MA20下方 (趋势偏弱)"
+        except:
+            return False, "技术面分析失败"
+
     def screen_hk_share(self, df):
         """Screen HK stock based on indicators."""
         if df is None or df.empty:
@@ -121,27 +154,35 @@ class Screener:
         
         try:
             latest = df.iloc[0]
-            latest_roe = latest['ROE_AVG']
-            latest_growth = latest['HOLDER_PROFIT_YOY']
-            debt_ratio = latest['DEBT_ASSET_RATIO']
+            # 港股指标：ROE、营收增长率、资产负债率、经营现金流等
+            latest_roe = latest.get('ROE_AVG')
+            latest_growth = latest.get('HOLDER_PROFIT_YOY')
+            debt_ratio = latest.get('DEBT_ASSET_RATIO')
+            
+            # 兼容空值情况
+            latest_roe = float(latest_roe) if pd.notna(latest_roe) else 0
+            latest_growth = float(latest_growth) if pd.notna(latest_growth) else 0
+            debt_ratio = float(debt_ratio) if pd.notna(debt_ratio) else 100
             
             reasons = []
             passed = True
             
-            if latest_roe is not None and float(latest_roe) > self.min_roe:
+            # 港股因为高分红、稳健特性，ROE要求可以略微放宽
+            if latest_roe > 10.0:
                 reasons.append(f"ROE: {latest_roe}%")
             else:
                 passed = False
                 reasons.append(f"ROE不达标: {latest_roe}%")
                 
-            if latest_growth is not None and float(latest_growth) > self.min_growth:
-                reasons.append(f"增长: {latest_growth}%")
+            if latest_growth > 0:
+                reasons.append(f"利润正增长: {latest_growth}%")
             else:
                 passed = False
-                reasons.append(f"成长性低: {latest_growth}%")
+                reasons.append(f"利润负增长: {latest_growth}%")
 
-            if debt_ratio is not None and float(debt_ratio) < self.max_debt_ratio:
-                reasons.append(f"负债率: {debt_ratio}%")
+            # 港股更看重资产健康度
+            if debt_ratio < 60.0:
+                reasons.append(f"负债健康: {debt_ratio}%")
             else:
                 passed = False
                 reasons.append(f"负债过高: {debt_ratio}%")
