@@ -14,12 +14,13 @@ def main():
     parser.add_argument("--market", type=str, default="A", choices=["A", "HK"], help="Market to screen (A or HK)")
     parser.add_argument("--symbol", type=str, help="Specific stock symbol to analyze")
     parser.add_argument("--auto", action="store_true", help="Run the full automated daily monitoring pipeline")
+    parser.add_argument("--date", type=str, help="Target date for historical backtesting (e.g., '2024-03-01')")
     args = parser.parse_args()
 
     if args.auto:
         from src.market_monitor import MarketMonitor
         monitor = MarketMonitor()
-        monitor.run_daily_scan()
+        monitor.run_daily_scan(target_date=args.date)
         return
 
     market = args.market

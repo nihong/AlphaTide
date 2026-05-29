@@ -10,7 +10,7 @@ class Screener:
         self.max_debt_ratio = 50.0
         self.min_cash_profit_ratio = 1.0
 
-    def screen_technical(self, symbol):
+    def screen_technical(self, symbol, target_date=None):
         """
         Technical Screen with Whipsaw & Liquidity Filters:
         1. Liquidity: 5-day avg turnover > 100M RMB (Avoid slippage)
@@ -18,6 +18,11 @@ class Screener:
         """
         try:
             df = ak.stock_zh_a_hist(symbol=symbol, period="daily", adjust="qfq")
+            
+            if target_date:
+                df['日期'] = pd.to_datetime(df['日期'])
+                df = df[df['日期'] <= pd.to_datetime(target_date)]
+
             if df.empty or len(df) < 30: return False, "数据不足"
             
             # 流动性过滤：近5日平均成交额大于1亿
@@ -39,10 +44,17 @@ class Screener:
         except:
             return False, "技术面分析失败"
 
-    def get_stocks_in_sector(self, sector_name):
+    def get_stocks_in_sector(self, sector_name, sector_label=None):
         """获取板块内的个股代码"""
         try:
-            # 使用东财板块成分股接口
+            # 优先尝试 Sina 接口 (无反爬限制，解决东财被封锁导致选票池为空的问题)
+            if sector_label:
+                df = ak.stock_sector_detail(sector=sector_label)
+                if df is not None and not df.empty:
+                    df = df.rename(columns={'code': '代码', 'name': '名称'})
+                    return df[['代码', '名称']]
+                    
+            # 备选：使用东财板块成分股接口
             df = ak.stock_board_industry_cons_em(symbol=sector_name)
             return df[['代码', '名称']]
         except:

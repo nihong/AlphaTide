@@ -1,5 +1,6 @@
 import os
 import sys
+import pandas as pd
 from datetime import datetime
 import time
 from src.data_fetcher import fetch_market_tide, fetch_a_stock_financials, fetch_market_index
@@ -18,12 +19,17 @@ class MarketMonitor:
         self.analyst = AIAnalyst()
         self.risk = RiskManager()
 
-    def check_market_light(self):
+    def check_market_light(self, target_date=None):
         """红绿灯系统：根据沪深300指数的量价关系判断市场环境并输出仓位建议"""
         # 使用沪深300 sh000300
         df = fetch_market_index("sh000300")
         if df is None or df.empty: return "YELLOW", "数据获取失败，默认建议仓位: 30%"
         
+        if target_date:
+            df['date'] = pd.to_datetime(df['date'])
+            df = df[df['date'] <= pd.to_datetime(target_date)]
+            if df.empty: return "YELLOW", f"找不到 {target_date} 之前的数据"
+
         latest_price = df.iloc[-1]['close']
         ma20 = df.iloc[-20:]['close'].mean()
         
@@ -45,59 +51,86 @@ class MarketMonitor:
             else:
                 return "YELLOW", f"🟡 空头环境但缩量下跌 (存在止跌惜售迹象)，建议观望 (仓位: 30%)"
 
-    def run_daily_scan(self):
-        print(f"[{datetime.now()}] 🚀 启动每日自动哨兵监控...")
+    def run_daily_scan(self, target_date=None):
+        run_time = target_date if target_date else datetime.now().strftime('%Y-%m-%d')
+        print(f"[{run_time}] 🚀 启动自动哨兵监控" + (" (历史回测模式)..." if target_date else "..."))
         
         # 0. 环境检查
         if not os.path.exists(".env"):
             print("⚠️ 警告: 根目录未发现 .env 文件，AI 点评功能将无法完整运行。请参考 .env.example 配置。")
 
         # 0. 大盘红绿灯
-        light, light_msg = self.check_market_light()
+        light, light_msg = self.check_market_light(target_date)
         print(f"🚦 大盘红绿灯: {light} - {light_msg}")
         
         if light == "RED":
-            self._generate_final_report([], light, light_msg, [])
+            self._generate_final_report([], light, light_msg, [], target_date)
             print("🛑 市场风险较大，已生成风险预警报告，停止进一步扫描。")
             return
 
-        # 1. 识别蓄势板块
-        potentials = self.predictor.predict_accumulation_sectors()
-        if potentials is None or potentials.empty:
-            print("⚠️ 未发现明显的蓄势板块，今天建议观望。")
-            self._generate_final_report([], light, light_msg, [])
+        # 1. 双核引擎识别蓄势与热门板块
+        acc_df, mom_df = self.predictor.predict_sectors()
+        
+        sectors_to_scan = []
+        
+        if acc_df is not None and not acc_df.empty:
+            acc_top = acc_df.head(3)
+            names = [row['名称'] if '名称' in row else row['板块'] for _, row in acc_top.iterrows()]
+            labels = [row['label'] if 'label' in row else None for _, row in acc_top.iterrows()]
+            for n, l in zip(names, labels):
+                sectors_to_scan.append({'name': n, 'label': l, 'type': '潜伏蓄势'})
+            print(f"🔥 锁定 Top 3 蓄势板块: {names}")
+            
+        if mom_df is not None and not mom_df.empty:
+            mom_top = mom_df.head(3)
+            names = [row['名称'] if '名称' in row else row['板块'] for _, row in mom_top.iterrows()]
+            labels = [row['label'] if 'label' in row else None for _, row in mom_top.iterrows()]
+            for n, l in zip(names, labels):
+                sectors_to_scan.append({'name': n, 'label': l, 'type': '动量热门'})
+            print(f"🔥 锁定 Top 3 热门板块: {names}")
+
+        if not sectors_to_scan:
+            print("⚠️ 未发现明显机会板块，今天建议观望。")
+            self._generate_final_report([], light, light_msg, [], target_date)
             return
-        
-        # 记录历史
-        stats = {row['名称']: row['蓄势指数'] for _, row in potentials.iterrows() if '名称' in potentials.columns}
-        self.history.record_daily_stats(stats)
-        
-        top_sectors = potentials.head(3)
-        print(f"🔥 锁定今日 3 大蓄势行业: {list(top_sectors['名称'] if '名称' in top_sectors.columns else top_sectors['板块'])}")
 
         recommendations = []
         sell_warnings = []
+        
+        # 去重与题材共振追踪
+        scanned_symbols = {} # {symbol: {data, sectors: []}}
 
         # 2. 在每个行业内精选个股
-        for _, sector in top_sectors.iterrows():
-            sector_name = sector['名称'] if '名称' in sector.index else sector['板块']
-            print(f"\n🔍 正在扫描行业: {sector_name} ...")
+        for sector_info in sectors_to_scan:
+            sector_name = sector_info['name']
+            sector_label = sector_info['label']
+            sector_type = sector_info['type']
             
-            stocks = self.screener.get_stocks_in_sector(sector_name)
+            print(f"\n🔍 正在扫描 [{sector_type}] 板块: {sector_name} ...")
+            stocks = self.screener.get_stocks_in_sector(sector_name, sector_label=sector_label)
             if stocks is None or stocks.empty: continue
             
-            for _, stock in stocks.head(10).iterrows():
+            # 每个行业扫描前30只龙头股
+            for _, stock in stocks.head(30).iterrows():
                 symbol = stock['代码']
                 name = stock['名称']
                 
-                # A. 卖出信号检查 (针对持仓或关注列表)
-                exit_signals, exit_desc = self.risk.evaluate_exit_signals(symbol)
+                # 记录题材共振
+                if symbol in scanned_symbols:
+                    if sector_name not in scanned_symbols[symbol]['sectors']:
+                        scanned_symbols[symbol]['sectors'].append(sector_name)
+                    continue
+                else:
+                    scanned_symbols[symbol] = {'name': name, 'sectors': [sector_name]}
+                
+                # A. 卖出信号检查 (仅针对持仓或关注，这里暂作全量展示预警)
+                exit_signals, exit_desc = self.risk.evaluate_exit_signals(symbol, target_date=target_date)
                 if exit_signals:
                     sell_warnings.append({"name": name, "symbol": symbol, "desc": exit_desc})
 
                 # B. 买入机会筛选 (三维过滤)
                 # 1. 相对强度检查 (RS)
-                rs_score = self.risk.get_rs_rating(symbol)
+                rs_score = self.risk.get_rs_rating(symbol, target_date=target_date)
                 if rs_score < 0: continue # 走得比大盘还弱的，不要
                 
                 # 2. 财务体检
@@ -106,36 +139,57 @@ class MarketMonitor:
                 
                 if f_pass:
                     # 3. 技术面体检 (包含流动性与震荡过滤)
-                    t_pass, t_detail = self.screener.screen_technical(symbol)
+                    t_pass, t_detail = self.screener.screen_technical(symbol, target_date=target_date)
                     if t_pass:
-                        print(f"✨ 发现优质标的: {name} ({symbol}) | RS强度: {round(rs_score, 2)}")
-                        
                         # 4. 计算建议仓位 (基于ATR波动率)
-                        suggested_pos = self.risk.calculate_position_size(symbol)
+                        suggested_pos = self.risk.calculate_position_size(symbol, target_date=target_date)
                         pos_str = f"{round(suggested_pos * 100, 1)}%"
                         
-                        # D. 获取 AI 深度分析
-                        prompt = self.analyst.generate_report_prompt(symbol, "A", financials, (f_pass, f_detail))
-                        ai_insight = self.analyst.analyze_with_llm(prompt)
-                        
-                        recommendations.append({
-                            "name": name,
-                            "symbol": symbol,
-                            "sector": sector_name,
-                            "reason": f"{f_detail} | {t_detail} | RS强度: {round(rs_score, 2)}",
-                            "position": pos_str,
-                            "ai_insight": ai_insight
-                        })
+                        scanned_symbols[symbol]['passed'] = True
+                        scanned_symbols[symbol]['f_detail'] = f_detail
+                        scanned_symbols[symbol]['t_detail'] = t_detail
+                        scanned_symbols[symbol]['rs_score'] = rs_score
+                        scanned_symbols[symbol]['pos_str'] = pos_str
+                        scanned_symbols[symbol]['financials'] = financials
 
-        # 3. 生成报告
-        self._generate_final_report(recommendations, light, light_msg, sell_warnings)
+        # 3. 汇总与共振加分
+        for symbol, data in scanned_symbols.items():
+            if data.get('passed'):
+                # 题材共振
+                resonance_str = " | ".join(data['sectors'])
+                resonance_bonus = "🌟 (题材共振)" if len(data['sectors']) > 1 else ""
+                
+                print(f"✨ 发现优质标的: {data['name']} ({symbol}) {resonance_bonus} | RS强度: {round(data['rs_score'], 2)}")
+                
+                # 获取 AI 深度分析
+                prompt = self.analyst.generate_report_prompt(symbol, "A", data['financials'], (True, data['f_detail']))
+                ai_insight = self.analyst.analyze_with_llm(prompt)
+                
+                recommendations.append({
+                    "name": data['name'],
+                    "symbol": symbol,
+                    "sector": resonance_str + " " + resonance_bonus,
+                    "reason": f"{data['f_detail']} | {data['t_detail']} | RS强度: {round(data['rs_score'], 2)}",
+                    "position": data['pos_str'],
+                    "ai_insight": ai_insight,
+                    "resonance_count": len(data['sectors'])
+                })
+                
+        # 按题材共振数量排序
+        recommendations.sort(key=lambda x: x['resonance_count'], reverse=True)
 
-    def _generate_final_report(self, recommendations, light, light_msg, sell_warnings):
+        # 4. 生成报告
+        self._generate_final_report(recommendations, light, light_msg, sell_warnings, target_date)
+
+    def _generate_final_report(self, recommendations, light, light_msg, sell_warnings, target_date=None):
         report_dir = "reports"
         os.makedirs(report_dir, exist_ok=True)
-        filename = f"{report_dir}/daily_decision_{datetime.now().strftime('%Y%m%d')}.md"
+        report_date = target_date.replace("-", "") if target_date else datetime.now().strftime('%Y%m%d')
+        display_date = target_date if target_date else datetime.now().strftime('%Y-%m-%d')
         
-        content = f"# 投资哨兵每日决策日报 ({datetime.now().strftime('%Y-%m-%d')})\n\n"
+        filename = f"{report_dir}/daily_decision_{report_date}.md"
+        
+        content = f"# AlphaTide 决策日报 (时间: {display_date})\n\n"
         content += f"## 🚦 市场环境监控\n"
         content += f"- **当前红绿灯**: {light}\n"
         content += f"- **状态描述**: {light_msg}\n\n"
@@ -151,12 +205,12 @@ class MarketMonitor:
             content += "大盘趋势转弱，目前不是介入良机。建议等待市场企稳回暖。\n"
         elif not recommendations:
             content += "## 📢 策略建议：观望\n"
-            content += "大盘环境尚可，但全市场扫描未发现符合【基本面+蓄势板块+相对强度+技术面】多维过滤的优质标的。建议保持耐心。\n"
+            content += "大盘环境尚可，但全市场扫描未发现符合【基本面+题材+相对强度+技术面】多维过滤的优质标的。建议保持耐心。\n"
         else:
             content += "## 🚀 今日精选标的\n"
             for rec in recommendations:
                 content += f"### {rec['name']} ({rec['symbol']})\n"
-                content += f"- **所属板块**: {rec['sector']}\n"
+                content += f"- **所属板块/题材**: {rec['sector']}\n"
                 content += f"- **科学仓位建议**: 建议买入总资金的 **{rec['position']}** (基于 ATR 波动风险平权)\n"
                 content += f"- **量化评分**: {rec['reason']}\n"
                 content += f"#### 🧠 AI 深度点评:\n{rec['ai_insight']}\n\n"

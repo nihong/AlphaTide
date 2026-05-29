@@ -11,7 +11,7 @@ class RiskManager:
         self.trailing_stop_threshold = 10.0 # 从近期最高点回撤超过10%无条件止损
         self.lookback_days = 60 # 计算最高点的回溯天数
 
-    def evaluate_exit_signals(self, symbol, current_price=None):
+    def evaluate_exit_signals(self, symbol, current_price=None, target_date=None):
         """
         评估卖出信号
         Returns: (signals, description)
@@ -21,6 +21,11 @@ class RiskManager:
             df = ak.stock_zh_a_hist(symbol=symbol, period="daily", adjust="qfq")
             if df.empty: return [], "无行情数据"
             
+            if target_date:
+                df['日期'] = pd.to_datetime(df['日期'])
+                df = df[df['日期'] <= pd.to_datetime(target_date)]
+                if df.empty: return [], "无该日期之前的行情"
+
             latest = df.iloc[-1]
             close = latest['收盘']
             ma20 = df.iloc[-20:]['收盘'].mean()
@@ -56,15 +61,24 @@ class RiskManager:
         except Exception as e:
             return [], f"卖出评估出错: {e}"
 
-    def get_rs_rating(self, symbol):
+    def get_rs_rating(self, symbol, target_date=None):
         """
         获取个股相对强度 (Relative Strength)
         逻辑：个股涨幅 vs 沪深300涨幅
         """
         try:
             # 简化版：计算过去20天的涨幅
-            df_stock = ak.stock_zh_a_hist(symbol=symbol, period="daily", adjust="qfq").iloc[-20:]
-            df_index = ak.stock_zh_index_daily(symbol="sh000300").iloc[-20:]
+            df_stock = ak.stock_zh_a_hist(symbol=symbol, period="daily", adjust="qfq")
+            df_index = ak.stock_zh_index_daily(symbol="sh000300")
+            
+            if target_date:
+                df_stock['日期'] = pd.to_datetime(df_stock['日期'])
+                df_stock = df_stock[df_stock['日期'] <= pd.to_datetime(target_date)]
+                df_index['date'] = pd.to_datetime(df_index['date'])
+                df_index = df_index[df_index['date'] <= pd.to_datetime(target_date)]
+
+            df_stock = df_stock.iloc[-20:]
+            df_index = df_index.iloc[-20:]
             
             stock_perf = (df_stock.iloc[-1]['收盘'] - df_stock.iloc[0]['收盘']) / df_stock.iloc[0]['收盘']
             index_perf = (df_index.iloc[-1]['close'] - df_index.iloc[0]['close']) / df_index.iloc[0]['close']
@@ -74,15 +88,16 @@ class RiskManager:
         except:
             return 0
 
-    def calculate_position_size(self, symbol, risk_per_trade=0.02, max_position=0.20):
+    def calculate_position_size(self, symbol, risk_per_trade=0.02, max_position=0.20, target_date=None):
         """
         基于 ATR (平均真实波幅) 计算科学仓位
-        risk_per_trade: 单笔交易愿意承担的总资金风险比例 (默认 2%)
-        max_position: 单只个股绝对仓位上限 (默认 20%)
-        Returns: 建议仓位比例 (如 0.15 表示建议动用总资金的 15%)
         """
         try:
             df = ak.stock_zh_a_hist(symbol=symbol, period="daily", adjust="qfq")
+            if target_date:
+                df['日期'] = pd.to_datetime(df['日期'])
+                df = df[df['日期'] <= pd.to_datetime(target_date)]
+
             if df.empty or len(df) < 15: return max_position
             
             df = df.iloc[-15:].copy()
