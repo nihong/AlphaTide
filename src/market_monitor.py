@@ -25,35 +25,50 @@ class MarketMonitor:
 
 
     def check_market_light(self, target_date=None):
-        """红绿灯系统：根据沪深300指数的量价关系判断市场环境并输出仓位建议"""
-        # 使用沪深300 sh000300
-        df = fetch_market_index("sh000300")
-        if df is None or df.empty: return "YELLOW", "数据获取失败，默认建议仓位: 30%"
+        """红绿灯系统：根据大盘与中证500(中小盘赚钱效应)判断市场环境"""
+        # 使用沪深300 sh000300 代表权重
+        df_300 = fetch_market_index("sh000300")
+        # 使用中证500 sh000905 代表中小盘活跃度(赚钱效应代理)
+        df_500 = fetch_market_index("sh000905")
+        
+        if df_300 is None or df_300.empty: return "YELLOW", "数据获取失败，默认建议仓位: 30%"
         
         if target_date:
-            df['date'] = pd.to_datetime(df['date'])
-            df = df[df['date'] <= pd.to_datetime(target_date)]
-            if df.empty: return "YELLOW", f"找不到 {target_date} 之前的数据"
+            df_300['date'] = pd.to_datetime(df_300['date'])
+            df_300 = df_300[df_300['date'] <= pd.to_datetime(target_date)]
+            if df_500 is not None and not df_500.empty:
+                df_500['date'] = pd.to_datetime(df_500['date'])
+                df_500 = df_500[df_500['date'] <= pd.to_datetime(target_date)]
+            if df_300.empty: return "YELLOW", f"找不到 {target_date} 之前的数据"
 
-        latest_price = df.iloc[-1]['close']
-        ma20 = df.iloc[-20:]['close'].mean()
+        latest_price = df_300.iloc[-1]['close']
+        ma20 = df_300.iloc[-20:]['close'].mean()
+        latest_vol = df_300.iloc[-1]['volume']
+        vol_ma5 = df_300.iloc[-5:]['volume'].mean()
         
-        latest_vol = df.iloc[-1]['volume']
-        vol_ma5 = df.iloc[-5:]['volume'].mean()
-        
-        # 逻辑判断
         is_uptrend = latest_price > ma20
         is_expanding_vol = latest_vol > vol_ma5
         
+        # 中小盘赚钱效应代理 (CSI 500 > MA20)
+        has_breadth = False
+        if df_500 is not None and len(df_500) >= 20:
+            latest_500 = df_500.iloc[-1]['close']
+            ma20_500 = df_500.iloc[-20:]['close'].mean()
+            has_breadth = latest_500 > ma20_500
+        
         if is_uptrend:
             if is_expanding_vol:
-                return "GREEN", f"🟢 多头环境且放量 (价格>MA20, 量>5日均量)，建议重仓 (仓位: 80%)"
+                return "GREEN", f"🟢 多头环境且放量 (沪深300>MA20, 量>5日均量)，建议重仓 (仓位: 80%)"
             else:
+                if has_breadth:
+                    return "GREEN", f"🟢 沪深300缩量但中证500活跃(存在结构性赚钱效应)，允许游资出击 (仓位: 60%)"
                 return "YELLOW", f"🟡 多头环境但缩量 (动能不足)，建议观望或轻仓 (仓位: 30%)"
         else:
             if is_expanding_vol:
-                return "RED", f"🔴 空头环境且放量下跌 (价格<MA20, 量>5日均量)，风险极大，建议空仓避险 (仓位: 0%)"
+                return "RED", f"🔴 空头环境且放量下跌，风险极大，建议空仓避险 (仓位: 0%)"
             else:
+                if has_breadth:
+                    return "YELLOW", f"🟡 权重护盘不力但中小盘活跃(题材行情)，建议轻仓参与题材 (仓位: 30%)"
                 return "YELLOW", f"🟡 空头环境但缩量下跌 (存在止跌惜售迹象)，建议观望 (仓位: 30%)"
 
     def check_hk_market_light(self, target_date=None):
@@ -229,6 +244,7 @@ class MarketMonitor:
             if stocks is None or stocks.empty: continue
             
             # 每个行业扫描前30只龙头股
+            count = 0
             for _, stock in stocks.head(30).iterrows():
                 symbol = str(stock['代码'])
                 name = stock['名称']
@@ -237,6 +253,7 @@ class MarketMonitor:
                 if symbol.startswith('8') or symbol.startswith('4') or 'ST' in name:
                     continue
                 
+                count += 1
                 # 记录题材共振
                 if symbol in scanned_symbols:
                     if sector_name not in scanned_symbols[symbol]['sectors']:
@@ -252,26 +269,40 @@ class MarketMonitor:
 
                 # B. 买入机会筛选
                 rs_score = self.risk.get_rs_rating(symbol, target_date=target_date)
-                if rs_score < 0: continue
+                if rs_score < 0: 
+                    print(f"  - {name} ({symbol}) RS分过低: {round(rs_score, 2)}")
+                    continue
                 
-                # 策略改进：潜伏蓄势板块放宽ROE到5%以寻找困境反转；热门板块维持10%
-                target_roe = 5.0 if sector_type == '潜伏蓄势' else 10.0
+                # 策略改进：双引擎解耦
+                if sector_type == '潜伏蓄势':
+                    target_roe = 5.0
+                    tech_mode = 'value'
+                else:
+                    target_roe = 3.0 # 热门股放宽基本面要求
+                    tech_mode = 'momentum'
                 
                 financials = fetch_a_stock_financials(symbol)
                 f_pass, f_detail = self.screener.screen_a_share(financials, min_roe=target_roe)
                 
-                if f_pass:
-                    t_pass, t_detail = self.screener.screen_technical(symbol, target_date=target_date)
-                    if t_pass:
-                        suggested_pos = self.risk.calculate_position_size(symbol, target_date=target_date)
-                        pos_str = f"{round(suggested_pos * 100, 1)}%"
-                        
-                        scanned_symbols[symbol]['passed'] = True
-                        scanned_symbols[symbol]['f_detail'] = f_detail
-                        scanned_symbols[symbol]['t_detail'] = t_detail
-                        scanned_symbols[symbol]['rs_score'] = rs_score
-                        scanned_symbols[symbol]['pos_str'] = pos_str
-                        scanned_symbols[symbol]['financials'] = financials
+                if not f_pass:
+                    print(f"  - {name} ({symbol}) 基本面未过: {f_detail}")
+                    continue
+
+                t_pass, t_detail = self.screener.screen_technical(symbol, target_date=target_date, mode=tech_mode)
+                if t_pass:
+                    suggested_pos = self.risk.calculate_position_size(symbol, target_date=target_date)
+                    pos_str = f"{round(suggested_pos * 100, 1)}%"
+                    
+                    scanned_symbols[symbol]['passed'] = True
+                    scanned_symbols[symbol]['f_detail'] = f_detail
+                    scanned_symbols[symbol]['t_detail'] = t_detail
+                    scanned_symbols[symbol]['rs_score'] = rs_score
+                    scanned_symbols[symbol]['pos_str'] = pos_str
+                    scanned_symbols[symbol]['financials'] = financials
+                else:
+                    print(f"  - {name} ({symbol}) 技术面未过: {t_detail}")
+                    pass
+            print(f"  - 板块 {sector_name} 扫描完成，实际检查个股数: {count}")
 
         # 4. 汇总与共振加分
         for symbol, data in scanned_symbols.items():

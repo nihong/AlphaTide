@@ -13,9 +13,7 @@ class RiskManager:
 
     def evaluate_exit_signals(self, symbol, current_price=None, target_date=None):
         """
-        评估卖出信号
-        Returns: (signals, description)
-        signals: List of triggered signal types ["Aggressive", "Conservative", "TrailingStop"]
+        评估卖出信号 (吊灯止损法 Chandelier Exit)
         """
         try:
             df = ak.stock_zh_a_hist(symbol=symbol, period="daily", adjust="qfq")
@@ -26,36 +24,46 @@ class RiskManager:
                 df = df[df['日期'] <= pd.to_datetime(target_date)]
                 if df.empty: return [], "无该日期之前的行情"
 
+            if len(df) < 20: return [], "数据不足以计算防守线"
+
             latest = df.iloc[-1]
             close = latest['收盘']
-            ma20 = df.iloc[-20:]['收盘'].mean()
             
-            # 计算近期最高价与当前回撤
+            # 计算近期波动率 (ATR)
+            df_atr = df.iloc[-20:].copy()
+            df_atr['prev_close'] = df_atr['收盘'].shift(1)
+            df_atr['tr1'] = df_atr['最高'] - df_atr['最低']
+            df_atr['tr2'] = (df_atr['最高'] - df_atr['prev_close']).abs()
+            df_atr['tr3'] = (df_atr['最低'] - df_atr['prev_close']).abs()
+            df_atr['TR'] = df_atr[['tr1', 'tr2', 'tr3']].max(axis=1)
+            atr = df_atr['TR'].iloc[-14:].mean()
+            
+            ma10 = df.iloc[-10:]['收盘'].mean()
+            
+            # 计算近期最高价
             lookback_df = df.iloc[-self.lookback_days:] if len(df) >= self.lookback_days else df
             recent_high = lookback_df['最高'].max()
-            drawdown = ((recent_high - close) / recent_high) * 100
             
             triggered_signals = []
             descriptions = []
 
-            # 0. 绝对止损点：高位回撤 (Trailing Stop)
-            # 逻辑：无论均线状态如何，只要从近期高点回撤超过设定阈值，立即触发生存防线。
-            if drawdown > self.trailing_stop_threshold:
+            # 1. 防守底线：吊灯止损 (最高点 - 2.5 ATR)
+            chandelier_stop = recent_high - (atr * 2.5)
+            if close < chandelier_stop:
                 triggered_signals.append("TrailingStop")
-                descriptions.append(f"⚫ 【绝对止损-高位回撤】：股价({close})已从近期高点({recent_high})回撤 {round(drawdown, 2)}%，超过设定的 {self.trailing_stop_threshold}% 红线，建议无条件止损/止盈。")
+                descriptions.append(f"⚫ 【吊灯止损防线】：股价({close})已跌破基于近期高点({recent_high})计算的 2.5ATR 防守线({round(chandelier_stop,2)})，建议无条件止损。")
 
-            # 1. 激进卖点：趋势破坏 (Aggressive - Trend Break)
-            # 逻辑：只要价格跌破20日线，说明短期上升趋势终结，必须离场。
-            if close < ma20:
+            # 2. 进攻止盈：跌破 MA10 (保住利润，比MA20更敏锐)
+            if close < ma10:
                 triggered_signals.append("Aggressive")
-                descriptions.append(f"🔴 【激进卖点-趋势破坏】：股价({close}) 已跌破 20日均线({round(ma20, 2)})。")
+                descriptions.append(f"🔴 【止盈/趋势破坏】：股价({close}) 已跌破 10日均线({round(ma10, 2)})，短期动能衰退。")
 
-            # 2. 保守卖点：情绪过热 (Conservative - Overheated)
-            # 逻辑：股价短期涨幅过大，偏离均线太远（乖离率过高），存在回调压力，建议落袋为安。
+            # 3. 情绪过热：乖离率
+            ma20 = df.iloc[-20:]['收盘'].mean()
             bias = ((close - ma20) / ma20) * 100
             if bias > self.bias_threshold:
                 triggered_signals.append("Conservative")
-                descriptions.append(f"🟡 【保守卖点-情绪过热】：股价偏离均线过远(乖离率 {round(bias, 2)}%)，建议分批减仓。")
+                descriptions.append(f"🟡 【情绪过热】：股价偏离20日均线过远(乖离率 {round(bias, 2)}%)，建议分批减仓。")
 
             return triggered_signals, "\n".join(descriptions)
         except Exception as e:
@@ -128,6 +136,10 @@ class RiskManager:
             return max_position
             
     def evaluate_hk_exit_signals(self, symbol, current_price=None, target_date=None):
+        """
+        HK Exit Signals:
+        1. Dynamic ATR trailing stop (replacing fixed 10% or MA20)
+        """
         try:
             df = ak.stock_hk_daily(symbol=symbol, adjust="qfq")
             if df.empty: return [], "无行情数据"
@@ -137,29 +149,39 @@ class RiskManager:
                 df = df[df['date'] <= pd.to_datetime(target_date)]
                 if df.empty: return [], "无该日期之前的行情"
 
+            if len(df) < 20: return [], "数据不足以计算防守线"
+
             latest = df.iloc[-1]
             close = latest['close']
-            ma20 = df.iloc[-20:]['close'].mean()
             
+            # 计算近期波动率 (ATR)
+            df_atr = df.iloc[-20:].copy()
+            df_atr['prev_close'] = df_atr['close'].shift(1)
+            df_atr['tr1'] = df_atr['high'] - df_atr['low']
+            df_atr['tr2'] = (df_atr['high'] - df_atr['prev_close']).abs()
+            df_atr['tr3'] = (df_atr['low'] - df_atr['prev_close']).abs()
+            df_atr['TR'] = df_atr[['tr1', 'tr2', 'tr3']].max(axis=1)
+            atr = df_atr['TR'].iloc[-14:].mean()
+            
+            # 回溯最高点
             lookback_df = df.iloc[-self.lookback_days:] if len(df) >= self.lookback_days else df
             recent_high = lookback_df['high'].max()
-            drawdown = ((recent_high - close) / recent_high) * 100
             
             triggered_signals = []
             descriptions = []
 
-            if drawdown > self.trailing_stop_threshold:
+            # HK特有防线：动态波动率止损 (2.0倍 ATR)
+            dynamic_stop_price = recent_high - (atr * 2.0)
+            if close < dynamic_stop_price:
                 triggered_signals.append("TrailingStop")
-                descriptions.append(f"⚫ 【绝对止损-高位回撤】：股价({close})已从近期高点({recent_high})回撤 {round(drawdown, 2)}%，超过设定的 {self.trailing_stop_threshold}% 红线，建议无条件止损/止盈。")
+                descriptions.append(f"⚫ 【波动率防守线击穿】：股价({close})已跌破基于近期最高点({recent_high})设定的 2.0ATR 动态止损位({round(dynamic_stop_price,2)})，建议无条件离场。")
 
-            if close < ma20:
-                triggered_signals.append("Aggressive")
-                descriptions.append(f"🔴 【激进卖点-趋势破坏】：股价({close}) 已跌破 20日均线({round(ma20, 2)})。")
-
+            # 乖离率保留作为情绪过热预警
+            ma20 = df.iloc[-20:]['close'].mean()
             bias = ((close - ma20) / ma20) * 100
             if bias > self.bias_threshold:
                 triggered_signals.append("Conservative")
-                descriptions.append(f"🟡 【保守卖点-情绪过热】：股价偏离均线过远(乖离率 {round(bias, 2)}%)，建议分批减仓。")
+                descriptions.append(f"🟡 【保守卖点-情绪过热】：股价偏离均线过远(乖离率 {round(bias, 2)}%)，逢高减仓。")
 
             return triggered_signals, "\n".join(descriptions)
         except Exception as e:

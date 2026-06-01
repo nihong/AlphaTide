@@ -62,7 +62,7 @@ class StrategyEvaluator:
             signals_today = []
             original_report_func = self.monitor._generate_final_report
             
-            def temp_report(recs, light, light_msg, warnings, target_date=None, market=market):
+            def temp_report(recs, light, light_msg, warnings, target_date=None, market=market, **kwargs):
                 for r in recs:
                     signals_today.append(r)
             
