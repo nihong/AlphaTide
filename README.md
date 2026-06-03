@@ -28,6 +28,7 @@ AlphaTide 是一个全自动化的 AI 投资决策支持系统，专门设计用
 - **🧠 AI 自动研报与舆情引擎**：
     - **深度点评**：集成 DeepSeek API，对精选个股生成专业的财务/技术/行业深度研报。
     - **🌡️ 全市场舆情体温**：每日自动抓取热点板块最新 50+ 条核心新闻，由 AI 实时判读情绪分与参与建议。
+- **📅 历史策略追踪看板**：系统每次执行后会自动解析历史报告，更新生成全局汇总大表 (`reports/master_summary.md`)，方便复盘历史推荐表现与大盘状态。
 
 
 ## 🌎 跨市场双重逻辑 (A股 vs 港股)
@@ -54,6 +55,7 @@ AlphaTide 是一个全自动化的 AI 投资决策支持系统，专门设计用
 ├── main.py                # 系统启动入口
 ├── AGENTS.md              # AI 智能体指令集（跨模型记忆）
 ├── reports/               # 每日生成的决策日报 (Markdown)
+│   └── master_summary.md  # 自动更新的历史策略总览看板
 ├── history/               # 行业蓄势指数历史数据
 ├── src/
 │   ├── market_monitor.py  # 核心监控大脑
@@ -62,7 +64,8 @@ AlphaTide 是一个全自动化的 AI 投资决策支持系统，专门设计用
 │   ├── screener.py        # 财务/技术筛选引擎
 │   ├── risk_manager.py    # RS强度与卖出预警
 │   ├── ai_analyst.py      # DeepSeek API 接入
-│   └── history_manager.py # 历史记忆管理
+│   ├── history_manager.py # 历史记忆管理
+│   └── report_summarizer.py # 历史报告自动提取与汇总
 └── .env                   # 隐私配置文件（API Key）
 ```
 
