@@ -13,7 +13,7 @@ class Screener:
         self.min_roe = 5.0
         self.min_growth = 20.0
         self.max_debt_ratio = 50.0
-        self.min_cash_profit_ratio = 0.8
+        self.min_cash_profit_ratio = 0.5
         
         # Load extra datasets once per screener instance to save time
         self.zcfz_df = fetch_latest_zcfz()

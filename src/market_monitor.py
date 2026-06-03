@@ -219,7 +219,7 @@ class MarketMonitor:
             past_3d_sectors.update(history_data[d].keys())
 
         if acc_df is not None and not acc_df.empty:
-            acc_top = acc_df.head(3)
+            acc_top = acc_df.head(5)
             for _, row in acc_top.iterrows():
                 name = row['名称'] if '名称' in row else row['板块']
                 label = row['label'] if 'label' in row else None
@@ -228,7 +228,7 @@ class MarketMonitor:
             print(f"🔥 锁定 Top 3 蓄势板块: {[s['name'] for s in sectors_to_scan if s['type'] == '潜伏蓄势']}")
             
         if mom_df is not None and not mom_df.empty:
-            mom_top = mom_df.head(3)
+            mom_top = mom_df.head(5)
             for _, row in mom_top.iterrows():
                 name = row['名称'] if '名称' in row else row['板块']
                 label = row['label'] if 'label' in row else None
