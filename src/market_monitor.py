@@ -308,7 +308,7 @@ class MarketMonitor:
                     tech_mode = 'momentum'
                 
                 financials = fetch_a_stock_financials(symbol)
-                f_pass, f_detail = self.screener.screen_a_share(financials, min_roe=target_roe)
+                f_pass, f_detail = self.screener.screen_a_share(symbol, financials, min_roe=target_roe)
                 
                 if not f_pass:
                     print(f"  - {name} ({symbol}) 基本面未过: {f_detail}")

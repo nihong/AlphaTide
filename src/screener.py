@@ -2,7 +2,10 @@ import pandas as pd
 
 import akshare as ak
 
-from src.data_fetcher import fetch_with_cache, fetch_a_valuation_history, fetch_a_stock_hist_cached
+from src.data_fetcher import (
+    fetch_with_cache, fetch_a_valuation_history, fetch_a_stock_hist_cached,
+    fetch_latest_zcfz, fetch_executive_holdings, fetch_stock_repurchases
+)
 
 class Screener:
     def __init__(self):
@@ -11,6 +14,11 @@ class Screener:
         self.min_growth = 20.0
         self.max_debt_ratio = 50.0
         self.min_cash_profit_ratio = 0.8
+        
+        # Load extra datasets once per screener instance to save time
+        self.zcfz_df = fetch_latest_zcfz()
+        self.executive_df = fetch_executive_holdings()
+        self.repurchase_df = fetch_stock_repurchases()
 
     def screen_valuation(self, symbol, target_date=None):
         """
@@ -213,7 +221,7 @@ class Screener:
 
         return None
 
-    def screen_a_share(self, df, min_roe=None):
+    def screen_a_share(self, symbol, df, min_roe=None):
         """
         Screen A-share based on abstract data.
         Indicators: ROE, Growth Trend, Cash-to-Profit Ratio.
@@ -299,10 +307,32 @@ class Screener:
                     passed = False
                     reasons.append(f"净现比低: {round(ratio, 2)}")
 
-            # 4. 合同负债 (前瞻性)
-            contract_liab_list = get_series('合同负债')
-            if contract_liab_list and contract_liab_list[0] > 0:
-                reasons.append(f"存在合同负债")
+            # 4. 合同负债 (前瞻性) - 使用资产负债表数据 (预收账款/合同负债)
+            if self.zcfz_df is not None and not self.zcfz_df.empty:
+                stock_zcfz = self.zcfz_df[self.zcfz_df['股票代码'] == symbol]
+                if not stock_zcfz.empty:
+                    adv_receipts = stock_zcfz.iloc[0].get('负债-预收账款', 0)
+                    if pd.notna(adv_receipts) and float(adv_receipts) > 0:
+                        reasons.append(f"有合同负债(预收): {round(float(adv_receipts)/100000000, 2)}亿")
+                        
+            # 5. 高管增持 / 股份回购 (内部人信心)
+            has_insider_support = False
+            if self.executive_df is not None and not self.executive_df.empty:
+                # 检查高管增持
+                exec_changes = self.executive_df[self.executive_df['SECURITY_CODE'] == symbol]
+                if not exec_changes.empty:
+                    # 判断是否有增持
+                    buy_actions = exec_changes[exec_changes['CHANGE_DIR'] == '增持']
+                    if not buy_actions.empty:
+                        has_insider_support = True
+                        reasons.append(f"⭐ 近期有高管增持")
+            
+            if self.repurchase_df is not None and not self.repurchase_df.empty:
+                # 检查股份回购
+                repurchases = self.repurchase_df[self.repurchase_df['股票代码'] == symbol]
+                if not repurchases.empty:
+                    has_insider_support = True
+                    reasons.append(f"⭐ 近期有股份回购计划")
 
             return passed, ", ".join(reasons)
             

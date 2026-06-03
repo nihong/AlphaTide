@@ -5,6 +5,7 @@ import os
 import time
 import random
 import pickle
+import requests
 from datetime import datetime, timedelta
 
 def get_headers():
@@ -139,6 +140,76 @@ def get_hk_stock_list():
     except Exception as e:
         print(f"Error fetching HK stock list: {e}")
         return None
+
+def fetch_executive_holdings(pages: int = 5):
+    """
+    获取高管增持/减持明细数据 (东方财富)
+    返回包含多页数据的 DataFrame
+    带4小时缓存
+    """
+    def _fetch():
+        url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+        all_data = []
+        for page in range(1, pages + 1):
+            params = {
+                "sortColumns": "CHANGE_DATE,SECURITY_CODE",
+                "sortTypes": "-1,-1",
+                "pageSize": "500",
+                "pageNumber": str(page),
+                "reportName": "RPT_EXECUTIVE_HOLD_DETAILS",
+                "columns": "ALL",
+                "source": "WEB",
+                "client": "WEB",
+            }
+            try:
+                r = requests.get(url, params=params, headers=get_headers(), timeout=10)
+                data_json = r.json()
+                if data_json and data_json.get("result") and data_json["result"].get("data"):
+                    all_data.extend(data_json["result"]["data"])
+                else:
+                    break
+            except Exception as e:
+                print(f"Error fetching executive holdings page {page}: {e}")
+                break
+        return pd.DataFrame(all_data) if all_data else pd.DataFrame()
+        
+    return fetch_with_cache("executive_holdings", _fetch, expiry_hours=4)
+
+def fetch_stock_repurchases():
+    """
+    获取股份回购数据 (东方财富)
+    带24小时缓存
+    """
+    return fetch_with_cache("stock_repurchases", ak.stock_repurchase_em, expiry_hours=24)
+
+def fetch_latest_zcfz():
+    """
+    获取最新一期的资产负债表(全市场)，用于筛选合同负债(预收账款)等。
+    带24小时缓存。
+    """
+    def _fetch():
+        # 尝试获取最近几个季度的资产负债表
+        now = datetime.now()
+        quarters = []
+        year = now.year
+        for _ in range(4): # 尝试过去4个季度
+            for month, day in [(12, 31), (9, 30), (6, 30), (3, 31)]:
+                if now.year == year and now.month < month:
+                    continue
+                quarters.append(f"{year}{month:02d}{day}")
+            year -= 1
+        
+        for q in quarters[:4]: # 尝试最近4个可能存在的财报日期
+            try:
+                df = ak.stock_zcfz_em(date=q)
+                if df is not None and not df.empty:
+                    print(f"Fetched balance sheet data for {q}")
+                    return df
+            except Exception:
+                pass
+        return pd.DataFrame()
+
+    return fetch_with_cache("latest_zcfz", _fetch, expiry_hours=24)
 
 if __name__ == "__main__":
     # Test HK
