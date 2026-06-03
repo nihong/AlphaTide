@@ -206,21 +206,39 @@ class MarketMonitor:
         
         sectors_to_scan = []
         
+        # 精细化板块分析：识别“新晋”热门板块 (过去3天未出现在 Top 3 中)
+        history_data = {}
+        try:
+            with open(self.history.storage_path, 'r') as f:
+                history_data = json.load(f)
+        except: pass
+        
+        past_3d_sectors = set()
+        dates = sorted(history_data.keys(), reverse=True)[:3]
+        for d in dates:
+            past_3d_sectors.update(history_data[d].keys())
+
         if acc_df is not None and not acc_df.empty:
             acc_top = acc_df.head(3)
-            names = [row['名称'] if '名称' in row else row['板块'] for _, row in acc_top.iterrows()]
-            labels = [row['label'] if 'label' in row else None for _, row in acc_top.iterrows()]
-            for n, l in zip(names, labels):
-                sectors_to_scan.append({'name': n, 'label': l, 'type': '潜伏蓄势'})
-            print(f"🔥 锁定 Top 3 蓄势板块: {names}")
+            for _, row in acc_top.iterrows():
+                name = row['名称'] if '名称' in row else row['板块']
+                label = row['label'] if 'label' in row else None
+                is_new = name not in past_3d_sectors
+                sectors_to_scan.append({'name': name, 'label': label, 'type': '潜伏蓄势', 'is_new': is_new})
+            print(f"🔥 锁定 Top 3 蓄势板块: {[s['name'] for s in sectors_to_scan if s['type'] == '潜伏蓄势']}")
             
         if mom_df is not None and not mom_df.empty:
             mom_top = mom_df.head(3)
-            names = [row['名称'] if '名称' in row else row['板块'] for _, row in mom_top.iterrows()]
-            labels = [row['label'] if 'label' in row else None for _, row in mom_top.iterrows()]
-            for n, l in zip(names, labels):
-                sectors_to_scan.append({'name': n, 'label': l, 'type': '动量热门'})
-            print(f"🔥 锁定 Top 3 热门板块: {names}")
+            for _, row in mom_top.iterrows():
+                name = row['名称'] if '名称' in row else row['板块']
+                label = row['label'] if 'label' in row else None
+                is_new = name not in past_3d_sectors
+                sectors_to_scan.append({'name': name, 'label': label, 'type': '动量热门', 'is_new': is_new})
+            print(f"🔥 锁定 Top 3 热门板块: {[s['name'] for s in sectors_to_scan if s['type'] == '动量热门']}")
+
+        # 记录今日板块数据以便后续识别“新晋”
+        current_stats = {s['name']: 100 for s in sectors_to_scan}
+        self.history.record_daily_stats(current_stats)
 
         if not sectors_to_scan:
             print("⚠️ 未发现明显机会板块，今天建议观望。")
@@ -238,8 +256,10 @@ class MarketMonitor:
             sector_name = sector_info['name']
             sector_label = sector_info['label']
             sector_type = sector_info['type']
+            is_new_sector = sector_info['is_new']
             
-            print(f"\n🔍 正在扫描 [{sector_type}] 板块: {sector_name} ...")
+            tag = " [新晋!]" if is_new_sector else ""
+            print(f"\n🔍 正在扫描 [{sector_type}]{tag} 板块: {sector_name} ...")
             stocks = self.screener.get_stocks_in_sector(sector_name, sector_label=sector_label)
             if stocks is None or stocks.empty: continue
             
@@ -273,6 +293,12 @@ class MarketMonitor:
                     print(f"  - {name} ({symbol}) RS分过低: {round(rs_score, 2)}")
                     continue
                 
+                # C. 估值百分位过滤 (新增)
+                v_pass, v_detail = self.screener.screen_valuation(symbol, target_date=target_date)
+                if not v_pass:
+                    print(f"  - {name} ({symbol}) 估值过高: {v_detail}")
+                    continue
+
                 # 策略改进：双引擎解耦
                 if sector_type == '潜伏蓄势':
                     target_roe = 5.0
@@ -294,7 +320,7 @@ class MarketMonitor:
                     pos_str = f"{round(suggested_pos * 100, 1)}%"
                     
                     scanned_symbols[symbol]['passed'] = True
-                    scanned_symbols[symbol]['f_detail'] = f_detail
+                    scanned_symbols[symbol]['f_detail'] = f_detail + " | " + v_detail
                     scanned_symbols[symbol]['t_detail'] = t_detail
                     scanned_symbols[symbol]['rs_score'] = rs_score
                     scanned_symbols[symbol]['pos_str'] = pos_str
@@ -310,7 +336,11 @@ class MarketMonitor:
                 resonance_str = " | ".join(data['sectors'])
                 resonance_bonus = "🌟 (题材共振)" if len(data['sectors']) > 1 else ""
                 
-                print(f"✨ 发现优质标的: {data['name']} ({symbol}) {resonance_bonus} | RS强度: {round(data['rs_score'], 2)}")
+                # 识别是否包含新晋题材
+                is_new_resonance = any(s in [sec['name'] for sec in sectors_to_scan if sec['is_new']] for s in data['sectors'])
+                new_tag = " 🔥 [新题材!]" if is_new_resonance else ""
+                
+                print(f"✨ 发现优质标的: {data['name']} ({symbol}) {resonance_bonus}{new_tag} | RS强度: {round(data['rs_score'], 2)}")
                 
                 prompt = self.analyst.generate_report_prompt(symbol, "A", data['financials'], (True, data['f_detail']))
                 ai_insight = self.analyst.analyze_with_llm(prompt)
@@ -318,7 +348,7 @@ class MarketMonitor:
                 recommendations.append({
                     "name": data['name'],
                     "symbol": symbol,
-                    "sector": resonance_str + " " + resonance_bonus,
+                    "sector": resonance_str + " " + resonance_bonus + new_tag,
                     "reason": f"{data['f_detail']} | {data['t_detail']} | RS强度: {round(data['rs_score'], 2)}",
                     "position": data['pos_str'],
                     "ai_insight": ai_insight,

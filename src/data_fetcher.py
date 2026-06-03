@@ -69,6 +69,10 @@ def fetch_a_stock_financials(symbol: str):
     """获取A股财报摘要，带24小时缓存"""
     return fetch_with_cache(f"fin_a_{symbol}", ak.stock_financial_abstract, expiry_hours=24, symbol=symbol)
 
+def fetch_a_valuation_history(symbol: str):
+    """获取A股估值历史(PE/PB)，带24小时缓存"""
+    return fetch_with_cache(f"val_a_{symbol}", ak.stock_a_lg_indicator, expiry_hours=24, symbol=symbol)
+
 def fetch_hk_stock_financials(symbol: str):
     """获取港股财报指标，带24小时缓存"""
     return fetch_with_cache(f"fin_hk_{symbol}", ak.stock_financial_hk_analysis_indicator_em, expiry_hours=24, symbol=symbol)

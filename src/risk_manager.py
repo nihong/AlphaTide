@@ -38,7 +38,9 @@ class RiskManager:
             df_atr['TR'] = df_atr[['tr1', 'tr2', 'tr3']].max(axis=1)
             atr = df_atr['TR'].iloc[-14:].mean()
             
-            ma10 = df.iloc[-10:]['收盘'].mean()
+            # 使用 EMA 替代 SMA
+            df['ema10'] = df['收盘'].ewm(span=10, adjust=False).mean()
+            ema10 = df['ema10'].iloc[-1]
             
             # 计算近期最高价
             lookback_df = df.iloc[-self.lookback_days:] if len(df) >= self.lookback_days else df
@@ -53,14 +55,15 @@ class RiskManager:
                 triggered_signals.append("TrailingStop")
                 descriptions.append(f"⚫ 【吊灯止损防线】：股价({close})已跌破基于近期高点({recent_high})计算的 2.5ATR 防守线({round(chandelier_stop,2)})，建议无条件止损。")
 
-            # 2. 进攻止盈：跌破 MA10 (保住利润，比MA20更敏锐)
-            if close < ma10:
+            # 2. 进攻止盈：跌破 EMA10 (保住利润，比EMA20更敏锐)
+            if close < ema10:
                 triggered_signals.append("Aggressive")
-                descriptions.append(f"🔴 【止盈/趋势破坏】：股价({close}) 已跌破 10日均线({round(ma10, 2)})，短期动能衰退。")
+                descriptions.append(f"🔴 【止盈/趋势破坏】：股价({close}) 已跌破 10日指数均线({round(ema10, 2)})，短期动能衰退。")
 
             # 3. 情绪过热：乖离率
-            ma20 = df.iloc[-20:]['收盘'].mean()
-            bias = ((close - ma20) / ma20) * 100
+            df['ema20'] = df['收盘'].ewm(span=20, adjust=False).mean()
+            ema20 = df['ema20'].iloc[-1]
+            bias = ((close - ema20) / ema20) * 100
             if bias > self.bias_threshold:
                 triggered_signals.append("Conservative")
                 descriptions.append(f"🟡 【情绪过热】：股价偏离20日均线过远(乖离率 {round(bias, 2)}%)，建议分批减仓。")
@@ -177,8 +180,9 @@ class RiskManager:
                 descriptions.append(f"⚫ 【波动率防守线击穿】：股价({close})已跌破基于近期最高点({recent_high})设定的 2.0ATR 动态止损位({round(dynamic_stop_price,2)})，建议无条件离场。")
 
             # 乖离率保留作为情绪过热预警
-            ma20 = df.iloc[-20:]['close'].mean()
-            bias = ((close - ma20) / ma20) * 100
+            df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
+            ema20 = df['ema20'].iloc[-1]
+            bias = ((close - ema20) / ema20) * 100
             if bias > self.bias_threshold:
                 triggered_signals.append("Conservative")
                 descriptions.append(f"🟡 【保守卖点-情绪过热】：股价偏离均线过远(乖离率 {round(bias, 2)}%)，逢高减仓。")
