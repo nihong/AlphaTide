@@ -100,7 +100,7 @@ class MarketMonitor:
             else:
                 return "YELLOW", f"🟡 空头环境但缩量下跌 (存在止跌惜售迹象)，建议观望 (仓位: 30%)"
 
-    def run_hk_scan(self, target_date=None):
+    def run_hk_scan(self, target_date=None, fast_mode=False):
         run_time = target_date if target_date else datetime.now().strftime('%Y-%m-%d')
         print(f"[{run_time}] 🚀 启动 [港股] 自动哨兵监控...")
         
@@ -153,8 +153,11 @@ class MarketMonitor:
                     suggested_pos = self.risk.calculate_hk_position_size(symbol, target_date=target_date)
                     pos_str = f"{round(suggested_pos * 100, 1)}%"
                     
-                    prompt = self.analyst.generate_report_prompt(symbol, "HK", financials, (f_pass, f_detail))
-                    ai_insight = self.analyst.analyze_with_llm(prompt)
+                    if fast_mode:
+                        ai_insight = "Fast Mode: LLM Skipped"
+                    else:
+                        prompt = self.analyst.generate_report_prompt(symbol, "HK", financials, (f_pass, f_detail))
+                        ai_insight = self.analyst.analyze_with_llm(prompt)
                     
                     recommendations.append({
                         "name": name,
@@ -168,9 +171,9 @@ class MarketMonitor:
 
         self._generate_final_report(recommendations, light, light_msg, sell_warnings, target_date, market="HK")
 
-    def run_daily_scan(self, target_date=None, market="A"):
+    def run_daily_scan(self, target_date=None, market="A", fast_mode=False):
         if market == "HK":
-            self.run_hk_scan(target_date)
+            self.run_hk_scan(target_date, fast_mode)
             return
             
         run_time = target_date if target_date else datetime.now().strftime('%Y-%m-%d')
@@ -342,8 +345,11 @@ class MarketMonitor:
                 
                 print(f"✨ 发现优质标的: {data['name']} ({symbol}) {resonance_bonus}{new_tag} | RS强度: {round(data['rs_score'], 2)}")
                 
-                prompt = self.analyst.generate_report_prompt(symbol, "A", data['financials'], (True, data['f_detail']))
-                ai_insight = self.analyst.analyze_with_llm(prompt)
+                if fast_mode:
+                    ai_insight = "Fast Mode: LLM Skipped"
+                else:
+                    prompt = self.analyst.generate_report_prompt(symbol, "A", data['financials'], (True, data['f_detail']))
+                    ai_insight = self.analyst.analyze_with_llm(prompt)
                 
                 recommendations.append({
                     "name": data['name'],

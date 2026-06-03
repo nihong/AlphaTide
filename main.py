@@ -15,12 +15,13 @@ def main():
     parser.add_argument("--symbol", type=str, help="Specific stock symbol to analyze")
     parser.add_argument("--auto", action="store_true", help="Run the full automated daily monitoring pipeline")
     parser.add_argument("--date", type=str, help="Target date for historical backtesting (e.g., '2024-03-01')")
+    parser.add_argument("--fast", action="store_true", help="Fast mode: Skip LLM analysis for faster backtesting")
     args = parser.parse_args()
 
     if args.auto:
         from src.market_monitor import MarketMonitor
         monitor = MarketMonitor()
-        monitor.run_daily_scan(target_date=args.date, market=args.market)
+        monitor.run_daily_scan(target_date=args.date, market=args.market, fast_mode=args.fast)
         return
 
     market = args.market
