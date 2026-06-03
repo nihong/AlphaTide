@@ -418,6 +418,14 @@ class MarketMonitor:
         with open(filename, 'w') as f:
             f.write(content)
         print(f"\n✅ 每日决策报告已生成: {filename}")
+        
+        # 自动更新总览表格
+        try:
+            from src.report_summarizer import update_master_summary
+            update_master_summary()
+            print("✅ 历史策略汇总表格已更新: reports/master_summary.md")
+        except Exception as e:
+            print(f"⚠️ 更新总览表格失败: {e}")
 
 
 if __name__ == "__main__":
