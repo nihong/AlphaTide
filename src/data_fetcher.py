@@ -65,6 +65,60 @@ def fetch_market_tide():
     """获取行业资金流向数据"""
     return fetch_with_cache("market_tide", ak.stock_sector_fund_flow_rank, expiry_hours=4, indicator="5日")
 
+
+def fetch_a_stock_hist(symbol: str, period: str = "daily", start_date: str = "19700101", end_date: str = "20500101", adjust: str = "qfq"):
+    """
+    获取A股历史K线数据，带双源容错：
+    1. 优先使用东方财富 (Eastmoney) 接口 ak.stock_zh_a_hist
+    2. 如果失败，自动降级到新浪 (Sina) 接口 ak.stock_zh_a_daily 并映射字段
+    """
+    try:
+        df = ak.stock_zh_a_hist(symbol=symbol, period=period, start_date=start_date, end_date=end_date, adjust=adjust)
+        if df is not None and not df.empty:
+            return df
+    except Exception as e:
+        print(f"⚠️ 东方财富历史接口获取失败 ({symbol}): {e}，尝试使用新浪接口降级...")
+
+    try:
+        # 新浪接口降级
+        prefix = "sh" if symbol.startswith("6") else "sz"
+        sina_symbol = f"{prefix}{symbol}"
+        df_sina = ak.stock_zh_a_daily(symbol=sina_symbol, start_date=start_date, end_date=end_date, adjust=adjust)
+        if df_sina is not None and not df_sina.empty:
+            rename_map = {
+                'date': '日期',
+                'open': '开盘',
+                'close': '收盘',
+                'high': '最高',
+                'low': '最低',
+                'volume': '成交量',
+                'amount': '成交额'
+            }
+            df_mapped = df_sina.rename(columns=rename_map)
+            if '日期' in df_mapped.columns:
+                df_mapped['日期'] = df_mapped['日期'].astype(str)
+            return df_mapped
+    except Exception as e:
+        print(f"❌ 新浪历史接口降级获取也失败 ({symbol}): {e}")
+
+    return pd.DataFrame()
+
+
+def fetch_a_stock_hist_cached(symbol: str, period: str = "daily", start_date: str = "19700101", end_date: str = "20500101", adjust: str = "qfq", expiry_hours: int = 4):
+    """获取A股历史K线，带有缓存和双源容错"""
+    cache_key = f"hist_a_{symbol}_{adjust}_{period}"
+    return fetch_with_cache(
+        cache_key,
+        fetch_a_stock_hist,
+        expiry_hours=expiry_hours,
+        symbol=symbol,
+        period=period,
+        start_date=start_date,
+        end_date=end_date,
+        adjust=adjust
+    )
+
+
 def fetch_a_stock_financials(symbol: str):
     """获取A股财报摘要，带24小时缓存"""
     return fetch_with_cache(f"fin_a_{symbol}", ak.stock_financial_abstract, expiry_hours=24, symbol=symbol)

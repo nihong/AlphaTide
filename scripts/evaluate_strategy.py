@@ -3,7 +3,7 @@ import pandas as pd
 import akshare as ak
 from datetime import datetime, timedelta
 from src.market_monitor import MarketMonitor
-from src.data_fetcher import fetch_with_cache
+from src.data_fetcher import fetch_with_cache, fetch_a_stock_hist_cached
 
 # 屏蔽 AI 调用以加速回测并节省成本
 from src.ai_analyst import AIAnalyst
@@ -24,7 +24,7 @@ class StrategyEvaluator:
         """计算买入后 N 天的收益率"""
         try:
             if market == "A":
-                df = ak.stock_zh_a_hist(symbol=symbol, period="daily", adjust="qfq")
+                df = fetch_a_stock_hist_cached(symbol, period="daily", adjust="qfq", expiry_hours=24)
                 date_col = '日期'
                 close_col = '收盘'
             else:

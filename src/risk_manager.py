@@ -1,5 +1,6 @@
 import akshare as ak
 import pandas as pd
+from src.data_fetcher import fetch_a_stock_hist_cached
 
 class RiskManager:
     def __init__(self):
@@ -16,7 +17,7 @@ class RiskManager:
         评估卖出信号 (吊灯止损法 Chandelier Exit)
         """
         try:
-            df = ak.stock_zh_a_hist(symbol=symbol, period="daily", adjust="qfq")
+            df = fetch_a_stock_hist_cached(symbol, period="daily", adjust="qfq", expiry_hours=4)
             if df.empty: return [], "无行情数据"
             
             if target_date:
@@ -79,7 +80,7 @@ class RiskManager:
         """
         try:
             # 简化版：计算过去20天的涨幅
-            df_stock = ak.stock_zh_a_hist(symbol=symbol, period="daily", adjust="qfq")
+            df_stock = fetch_a_stock_hist_cached(symbol, period="daily", adjust="qfq", expiry_hours=4)
             df_index = ak.stock_zh_index_daily(symbol="sh000300")
             
             if target_date:
@@ -104,7 +105,7 @@ class RiskManager:
         基于 ATR (平均真实波幅) 计算科学仓位
         """
         try:
-            df = ak.stock_zh_a_hist(symbol=symbol, period="daily", adjust="qfq")
+            df = fetch_a_stock_hist_cached(symbol, period="daily", adjust="qfq", expiry_hours=4)
             if target_date:
                 df['日期'] = pd.to_datetime(df['日期'])
                 df = df[df['日期'] <= pd.to_datetime(target_date)]

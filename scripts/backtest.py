@@ -3,7 +3,7 @@ import pandas as pd
 import akshare as ak
 from datetime import datetime, timedelta
 from src.market_monitor import MarketMonitor
-from src.data_fetcher import fetch_market_index
+from src.data_fetcher import fetch_market_index, fetch_a_stock_hist_cached
 
 class BacktestEngine:
     def __init__(self):
@@ -61,7 +61,7 @@ class BacktestEngine:
             
             try:
                 if market == "A":
-                    df = ak.stock_zh_a_hist(symbol=symbol, period="daily", start_date=buy_date.replace("-", ""), end_date=end_date.replace("-", ""), adjust="qfq")
+                    df = fetch_a_stock_hist_cached(symbol, period="daily", start_date=buy_date.replace("-", ""), end_date=end_date.replace("-", ""), adjust="qfq", expiry_hours=24)
                     close_col = '收盘'
                 else:
                     df = ak.stock_hk_daily(symbol=symbol, adjust="qfq")

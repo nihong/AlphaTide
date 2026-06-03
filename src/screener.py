@@ -2,7 +2,7 @@ import pandas as pd
 
 import akshare as ak
 
-from src.data_fetcher import fetch_with_cache, fetch_a_valuation_history
+from src.data_fetcher import fetch_with_cache, fetch_a_valuation_history, fetch_a_stock_hist_cached
 
 class Screener:
     def __init__(self):
@@ -50,7 +50,7 @@ class Screener:
         mode 'momentum': Breakout/Surge (近5日异动大阳线) - For hot sectors.
         """
         try:
-            df = fetch_with_cache(f"hist_a_{symbol}", ak.stock_zh_a_hist, expiry_hours=24, symbol=symbol, period="daily", adjust="qfq")
+            df = fetch_a_stock_hist_cached(symbol, period="daily", adjust="qfq", expiry_hours=24)
             
             if target_date:
                 df['日期'] = pd.to_datetime(df['日期'])
@@ -102,22 +102,53 @@ class Screener:
                     return False, "未满足缩量回踩或MACD走弱"
                     
             elif mode == 'momentum':
-                # 游资异动引擎：近期(5日内)有标志性放量大阳线，且 MACD 金叉中
+                # 游资异动引擎（改良版）：近期(2-5日内)有标志性突破放量大阳线，但目前处于缩量回踩阶段，避免高位接盘
                 recent_5d = df.iloc[-5:]
                 recent_30d_vol_avg = df.iloc[-30:]['成交量'].mean()
                 
-                has_surge = False
-                for _, row in recent_5d.iterrows():
+                breakout_idx = -1
+                breakout_row = None
+                
+                # 从过去5日数据中（不包含今天）寻找标志性放量突破大阳线
+                for i in range(len(recent_5d) - 1):
+                    row = recent_5d.iloc[i]
                     pct_change = (row['收盘'] - row['开盘']) / row['开盘']
                     vol_ratio = row['成交量'] / recent_30d_vol_avg
                     if pct_change > 0.05 and vol_ratio > 1.5:
-                        has_surge = True
+                        breakout_idx = i
+                        breakout_row = row
                         break
-                        
-                if has_surge and latest_price > ema20 and latest_macd > 0:
-                    return True, f"游资引擎: 放量异动且处于 MACD 多头区间"
+                
+                # 如果没有近期突破，或者突破发生在今天（代表今天正在暴涨，只有低位首板才允许买入）
+                if breakout_row is None:
+                    latest_row = recent_5d.iloc[-1]
+                    pct_change = (latest_row['收盘'] - latest_row['开盘']) / latest_row['开盘']
+                    vol_ratio = latest_row['成交量'] / recent_30d_vol_avg
+                    if pct_change > 0.05 and vol_ratio > 1.5:
+                        # 检查今天是否离均线过远 (比如偏离 EMA10 > 6% 代表追高)
+                        df['ema10'] = df['收盘'].ewm(span=10, adjust=False).mean()
+                        ema10 = df['ema10'].iloc[-1]
+                        bias_ema10 = (latest_price - ema10) / ema10
+                        if bias_ema10 <= 0.06 and latest_macd > 0:
+                            return True, f"游资引擎 (日内异动): 今日低位放量首板启动 (MACD多头)"
+                    return False, "缺乏近期资金突破或今日已涨幅过高"
+                
+                # 存在近期突破大阳线，判断今天是否是“缩量回踩”
+                # 1. 今天收盘价高于 EMA10 (趋势仍在)
+                df['ema10'] = df['收盘'].ewm(span=10, adjust=False).mean()
+                ema10 = df['ema10'].iloc[-1]
+                is_above_support = latest_price > ema10
+                
+                # 2. 今天收盘价低于或等于突破日收盘价，或者处于突破高点的小幅回撤区间（防连续暴涨）
+                is_pullback = latest_price <= breakout_row['收盘'] * 1.02
+                
+                # 3. 今天成交量显著缩量（成交量小于 5 日均量，且小于突破日成交量的 70%）
+                is_shrinking = latest_vol < vol_ma5 and latest_vol < breakout_row['成交量'] * 0.7
+                
+                if is_above_support and is_pullback and is_shrinking and latest_macd > 0:
+                    return True, f"游资引擎 (回踩买点): 近期异动大阳线后缩量回踩 EMA10 (MACD多头)"
                 else:
-                    return False, "缺乏资金抢筹或MACD空头"
+                    return False, "突破后未缩量或股价未能企稳回踩"
                     
             return False, "未知模式"
         except Exception as e:
@@ -125,19 +156,62 @@ class Screener:
 
     def get_stocks_in_sector(self, sector_name, sector_label=None):
         """获取板块内的个股代码"""
-        try:
-            # 优先尝试 Sina 接口 (无反爬限制，解决东财被封锁导致选票池为空的问题)
-            if sector_label:
+        # 定义东财到新浪板块标签的映射，应对东财被封锁的情况
+        em_to_sina = {
+            # 通信/电子/半导体 -> 电子信息/电子器件
+            "通信设备": "new_dzxx", "通信": "new_dzxx", "通信网络设备及器件": "new_dzxx",
+            "计算机设备": "new_dzxx", "软件开发": "new_dzxx", "IT服务": "new_dzxx",
+            "半导体": "new_dzqj", "电子元件": "new_dzqj", "光学光电子": "new_dzqj",
+            "消费电子": "new_dzqj", "电子化学品": "new_dzqj",
+            # 资源/化工/有色/煤炭/石油/钢铁
+            "有色金属": "new_ysjs", "小金属": "new_ysjs", "金属新材料": "new_ysjs",
+            "煤炭行业": "new_mthy", "石油行业": "new_syhy", "石油加工": "new_syhy",
+            "钢铁行业": "new_gthy", "化学制品": "new_hghy", "化学原料": "new_hghy",
+            "农药兽药": "new_nyhf", "化肥行业": "new_nyhf", "塑料制品": "new_slzp",
+            "橡胶制品": "new_slzp", "化学纤维": "new_hqhy",
+            # 电力/新能源/设备
+            "电力行业": "new_dlhy", "光伏设备": "new_fdsb", "风电设备": "new_fdsb",
+            "电网设备": "new_dqhy", "电机": "new_dqhy", "电池": "new_dqhy",
+            # 医药/医疗
+            "化学制药": "new_swzz", "生物制品": "new_swzz", "中药": "new_swzz",
+            "医药商业": "new_sybh", "医疗器械": "new_ylqx", "医疗服务": "new_ylqx",
+            # 机械/制造
+            "通用设备": "new_jxhy", "专用设备": "new_jxhy", "仪器仪表": "new_yqyb",
+            "轨交设备": "new_jxhy", "工程机械": "new_jxhy", "船舶制造": "new_cbzz",
+            "航空机场": "new_jtys", "航天航空": "new_fjzz", "汽车整车": "new_qczz",
+            "汽车零部件": "new_qczz",
+            # 消费/金融/其他
+            "酿酒行业": "new_ljhy", "食品饮料": "new_sphy", "农林牧渔": "new_nlmy",
+            "家电行业": "new_jdhy", "装修建材": "new_jzjc", "水泥建材": "new_snhy",
+            "房地产开发": "new_fdc", "房地产服务": "new_fdc", "银行": "new_jrhy",
+            "证券": "new_jrhy", "保险": "new_jrhy", "多元金融": "new_jrhy",
+            "工程建设": "new_jzjc", "商业百货": "new_sybh", "旅游酒店": "new_jdly",
+            "传媒": "new_cmyl", "游戏": "new_cmyl",
+        }
+
+        # 如果没有传 sector_label，尝试从映射表中查找
+        if not sector_label and sector_name in em_to_sina:
+            sector_label = em_to_sina[sector_name]
+
+        # 1. 尝试使用 Sina 接口 (更稳定，不怕封锁)
+        if sector_label:
+            try:
                 df = ak.stock_sector_detail(sector=sector_label)
                 if df is not None and not df.empty:
                     df = df.rename(columns={'code': '代码', 'name': '名称'})
                     return df[['代码', '名称']]
-                    
-            # 备选：使用东财板块成分股接口
+            except Exception as e:
+                print(f"⚠️ 使用新浪接口获取板块 [{sector_name}] 成分股失败: {e}")
+
+        # 2. 备选：使用东财板块成分股接口
+        try:
             df = ak.stock_board_industry_cons_em(symbol=sector_name)
-            return df[['代码', '名称']]
-        except:
-            return None
+            if df is not None and not df.empty:
+                return df[['代码', '名称']]
+        except Exception as e:
+            print(f"⚠️ 使用东财接口获取板块 [{sector_name}] 成分股失败: {e}")
+
+        return None
 
     def screen_a_share(self, df, min_roe=None):
         """
@@ -172,11 +246,31 @@ class Screener:
             if not roe_list: roe_list = get_series('净资产收益率')
             
             latest_roe = roe_list[0] if roe_list else None
-            if latest_roe and latest_roe >= target_roe:
-                reasons.append(f"ROE: {latest_roe}%")
+            
+            # 根据财报公布期进行年化处理（解决一季报、半年报等非年度指标偏低导致被误杀的问题）
+            latest_date = str(df.columns[2]) if len(df.columns) > 2 else ""
+            roe_multiplier = 1.0
+            quarter_name = "年报"
+            if latest_date.endswith("0331"):
+                roe_multiplier = 4.0
+                quarter_name = "一季报(已年化)"
+            elif latest_date.endswith("0630"):
+                roe_multiplier = 2.0
+                quarter_name = "半年报(已年化)"
+            elif latest_date.endswith("0930"):
+                roe_multiplier = 4.0 / 3.0
+                quarter_name = "三季报(已年化)"
+                
+            if latest_roe is not None:
+                annualized_roe = latest_roe * roe_multiplier
+                if annualized_roe >= target_roe:
+                    reasons.append(f"ROE: {round(annualized_roe, 2)}% ({quarter_name})")
+                else:
+                    passed = False
+                    reasons.append(f"ROE不达标: {round(annualized_roe, 2)}% ({quarter_name}, 要求>={target_roe}%)")
             else:
                 passed = False
-                reasons.append(f"ROE不达标: {latest_roe}% (要求>={target_roe}%)")
+                reasons.append("无有效ROE数据")
 
             # 2. 增长斜率 (归母净利润同比)
             growth_list = get_series('归母净利润同比增长')
