@@ -51,10 +51,11 @@
 - **模板参考**：查看 `.env.example` 进行快速配置。
 
 
-## ⏰ 自动化运行 (OpenClaw / QClaw)
-建议将本项目集成至 **OpenClaw** 或 **QClaw** platform。
-- **使命**：实现无人值守的每日扫描与实时预警推送。
-- **触发逻辑**：交易日 16:00 自动执行 `python3 main.py --auto` (A股) 或 `python3 main.py --auto --market HK` (港股)。
+## ⏰ 自动化运行 (尾盘买入法)
+建议将本项目集成至 **OpenClaw**、**QClaw** platform 或本地 `crontab`。
+- **使命**：实现无人值守的每日扫描与实时预警推送，利用“尾盘买入法”规避隔夜风险。
+- **A 股触发逻辑**：每个交易日 **14:50** 自动执行 `python3 main.py --auto`，并在 **14:55** 完成买卖。
+- **港股触发逻辑**：每个交易日 **15:50** 自动执行 `python3 main.py --auto --market HK`，并在 **15:55** 完成买卖。
 - **通知渠道**：通过 QClaw 插件将生成的 Markdown 报告推送至用户移动端。
 
 ---

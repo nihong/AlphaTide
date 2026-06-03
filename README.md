@@ -96,12 +96,19 @@ cp .env.example .env
   python3 main.py --auto --date "2024-03-01"
   ```
 
-## ⏰ 自动化运行 (OpenClaw / QClaw)
+## ⏰ 自动化运行 (尾盘买入法)
 建议将本项目作为 **OpenClaw** 或 **QClaw** 的一个 Skill (技能) 接入，实现云端定时任务与消息推送。
-- **定时触发**：建议设置在每个交易日 16:00 运行。
+- **A 股定时触发**：建议设置在每个交易日 **14:50** 运行 `python3 main.py --auto`，并在 **14:55** 完成买卖。
+- **港股定时触发**：建议设置在每个交易日 **15:50** 运行 `python3 main.py --auto --market HK`，并在 **15:55** 完成买卖。
 - **消息推送**：可配置 Webhook 将 `reports/` 下生成的每日决策日报推送至飞书、钉钉或微信。
-- **本地备份**：也可通过 macOS/Linux 的 `crontab` 设置：
-  `0 16 * * 1-5 cd /你的路径/AlphaTide && /usr/bin/python3 main.py --auto`
+- **本地 `crontab` 设置示例**：
+  ```bash
+  # A 股：周一至周五 14:50 运行
+  50 14 * * 1-5 cd /你的路径/AlphaTide && /usr/bin/python3 main.py --auto
+  
+  # 港股：周一至周五 15:50 运行
+  50 15 * * 1-5 cd /你的路径/AlphaTide && /usr/bin/python3 main.py --auto --market HK
+  ```
 
 ## 🔐 安全声明
 - 本项目严禁在代码中硬编码任何 API 密钥。
