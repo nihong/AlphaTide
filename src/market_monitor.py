@@ -194,10 +194,9 @@ class MarketMonitor:
         light, light_msg = self.check_market_light(target_date)
         print(f"🚦 大盘红绿灯: {light} - {light_msg}")
         
-        if light == "RED":
-            self._generate_final_report([], light, light_msg, [], target_date, market=market)
-            print("🛑 市场风险较大，已生成风险预警报告，停止进一步扫描。")
-            return
+        is_bear_market = (light == "RED" or "空头环境" in light_msg)
+        if is_bear_market:
+            print("🌧️ 识别为熊市环境，已开启大盘防守开关，全系统切换至 [左侧防守引擎 (超跌反弹)] 模式")
 
         # 1. 舆情热点探测 (降维打击：感知市场体温)
         market_temperature = []
@@ -302,8 +301,11 @@ class MarketMonitor:
                     print(f"  - {name} ({symbol}) 估值过高: {v_detail}")
                     continue
 
-                # 策略改进：双引擎解耦
-                if sector_type == '潜伏蓄势':
+                # 策略改进：双引擎解耦 (加入牛熊双轨切换)
+                if is_bear_market:
+                    target_roe = 5.0  # 熊市防守，要求极高的基本面
+                    tech_mode = 'defensive'
+                elif sector_type == '潜伏蓄势':
                     target_roe = 5.0
                     tech_mode = 'value'
                 else:

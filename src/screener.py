@@ -158,6 +158,25 @@ class Screener:
                 else:
                     return False, "突破后未缩量或股价未能企稳回踩"
                     
+            elif mode == 'defensive':
+                # 熊市防守引擎 (超跌反弹)：只买入被极度错杀的绩优股
+                df['ma20'] = df['收盘'].rolling(window=20).mean()
+                bias_ma20 = (latest_price - df['ma20'].iloc[-1]) / df['ma20'].iloc[-1]
+                
+                delta = df['收盘'].diff()
+                gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                rs = gain / loss
+                df['rsi_14'] = 100 - (100 / (1 + rs))
+                latest_rsi = df['rsi_14'].iloc[-1]
+                
+                macd_improving = latest_macd > prev_macd
+                
+                if (bias_ma20 < -0.15 or latest_rsi < 30) and macd_improving:
+                    return True, f"左侧防守引擎 (超跌反弹): 严重超跌 (RSI: {latest_rsi:.1f}, BIAS: {bias_ma20*100:.1f}%) 且 MACD 动能改善"
+                else:
+                    return False, f"未达到极度恐慌区间或未企稳 (RSI: {latest_rsi:.1f}, BIAS: {bias_ma20*100:.1f}%)"
+                    
             return False, "未知模式"
         except Exception as e:
             return False, f"技术面分析失败: {str(e)}"
