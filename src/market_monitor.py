@@ -392,6 +392,18 @@ class MarketMonitor:
         content += f"- **当前红绿灯**: {light}\n"
         content += f"- **状态描述**: {light_msg}\n\n"
         
+        if light == "RED" and market == "A":
+            content += "## 🛡️ 熊市融券对冲建议 (ETF Hedging)\n"
+            content += "> **🚨 警告：当前市场处于空头下行环境（红灯）。为了保护本金及已有防守仓位免受系统性崩盘影响，建议启动无杠杆对冲。**\n"
+            content += "- **对冲标的**: 沪深300ETF (510300) 或 中证1000ETF (512100)\n"
+            content += "- **操作指令**: 动用闲置资金的 20%~30%，使用**【融券卖出】**指令做空上述宽基ETF，以获取大盘下跌的绝对收益。当大盘重新站上均线（转黄/绿灯）时买券还券。\n"
+            content += "- **风控红线**: 绝对禁止融券做空任何题材妖股，防止被逼空拉爆。\n\n"
+        elif light == "RED" and market == "HK":
+            content += "## 🛡️ 熊市反向对冲建议 (Inverse ETF Hedging)\n"
+            content += "> **🚨 警告：港股当前处于空头环境（红灯），受外资流出或流动性枯竭影响较大。建议使用反向 ETF 进行无杠杆对冲。**\n"
+            content += "- **对冲标的**: FI南方恒指 (7300.HK) - 每日反向-1x\n"
+            content += "- **操作指令**: 动用闲置资金的 20%~30%，直接【现价买入】该反向ETF。无需融券账户即可实现对冲，获取大盘下跌的等比收益。\n\n"
+        
         if sentiment_data:
             content += "## 🌡️ 全市场舆情体温 (AI 实时判读)\n"
             content += "| 板块名称 | 情绪分 | AI 核心逻辑与参与建议 |\n"
