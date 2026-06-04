@@ -12,9 +12,10 @@ class RiskManager:
         self.trailing_stop_threshold = 10.0 # 从近期最高点回撤超过10%无条件止损
         self.lookback_days = 60 # 计算最高点的回溯天数
 
-    def evaluate_exit_signals(self, symbol, current_price=None, target_date=None):
+    def evaluate_exit_signals(self, symbol, current_price=None, target_date=None, regime=None):
         """
-        评估卖出信号 (吊灯止损法 Chandelier Exit)
+        评估卖出信号 (Context-Aware)
+        根据当前大盘气候 (regime) 动态调整卖出条件
         """
         try:
             df = fetch_a_stock_hist_cached(symbol, period="daily", adjust="qfq", expiry_hours=4)
@@ -39,37 +40,56 @@ class RiskManager:
             df_atr['TR'] = df_atr[['tr1', 'tr2', 'tr3']].max(axis=1)
             atr = df_atr['TR'].iloc[-14:].mean()
             
-            # 使用 EMA 替代 SMA
             df['ema10'] = df['收盘'].ewm(span=10, adjust=False).mean()
+            df['ema20'] = df['收盘'].ewm(span=20, adjust=False).mean()
             ema10 = df['ema10'].iloc[-1]
+            ema20 = df['ema20'].iloc[-1]
             
-            # 计算近期最高价
             lookback_df = df.iloc[-self.lookback_days:] if len(df) >= self.lookback_days else df
             recent_high = lookback_df['最高'].max()
             
             triggered_signals = []
             descriptions = []
 
-            # 1. 防守底线：吊灯止损 (最高点 - 2.5 ATR)
-            chandelier_stop = recent_high - (atr * 2.5)
+            # 环境自适应卖出逻辑
+            if regime == "OSCILLATION":
+                # 震荡市：布林带高抛低吸，触及上轨止盈
+                df['ma20'] = df['收盘'].rolling(window=20).mean()
+                df['std20'] = df['收盘'].rolling(window=20).std()
+                upper_band = df['ma20'].iloc[-1] + (2 * df['std20'].iloc[-1])
+                
+                if close >= upper_band * 0.98:
+                    triggered_signals.append("OscillationExit")
+                    descriptions.append(f"🔴 【震荡市止盈】：股价({close})已触及布林带上轨({round(upper_band,2)})，建议主动止盈。")
+                
+                # 震荡市防守略紧
+                stop_atr = 2.0
+            elif regime == "SLOW_RISE":
+                # 慢涨市：只要不有效跌破EMA20，忽略盘中小幅刺穿，放宽ATR
+                stop_atr = 3.0
+                if close < ema20:
+                    triggered_signals.append("SlowRiseExit")
+                    descriptions.append(f"🔴 【慢涨破坏】：股价({close})已跌破 20日均线核心支撑({round(ema20,2)})，慢牛格局结束。")
+            else:
+                # 正常/极端市：严格的 2.5ATR 和 EMA10 止盈
+                stop_atr = 2.5
+                if close < ema10:
+                    triggered_signals.append("Aggressive")
+                    descriptions.append(f"🔴 【止盈/趋势破坏】：股价({close}) 已跌破 10日指数均线({round(ema10, 2)})，短期动能衰退。")
+
+            # 通用防线：吊灯止损
+            chandelier_stop = recent_high - (atr * stop_atr)
             if close < chandelier_stop:
                 triggered_signals.append("TrailingStop")
-                descriptions.append(f"⚫ 【吊灯止损防线】：股价({close})已跌破基于近期高点({recent_high})计算的 2.5ATR 防守线({round(chandelier_stop,2)})，建议无条件止损。")
+                descriptions.append(f"⚫ 【吊灯防线击穿】：股价({close})已跌破基于最高点计算的 {stop_atr}ATR 防守线({round(chandelier_stop,2)})，必须止损。")
 
-            # 2. 进攻止盈：跌破 EMA10 (保住利润，比EMA20更敏锐)
-            if close < ema10:
-                triggered_signals.append("Aggressive")
-                descriptions.append(f"🔴 【止盈/趋势破坏】：股价({close}) 已跌破 10日指数均线({round(ema10, 2)})，短期动能衰退。")
-
-            # 3. 情绪过热：乖离率
-            df['ema20'] = df['收盘'].ewm(span=20, adjust=False).mean()
-            ema20 = df['ema20'].iloc[-1]
+            # 情绪过热：乖离率
             bias = ((close - ema20) / ema20) * 100
             if bias > self.bias_threshold:
                 triggered_signals.append("Conservative")
-                descriptions.append(f"🟡 【情绪过热】：股价偏离20日均线过远(乖离率 {round(bias, 2)}%)，建议分批减仓。")
+                descriptions.append(f"🟡 【情绪过热】：股价偏离20日均线过远(乖离率 {round(bias, 2)}%)，建议减仓。")
 
-            return triggered_signals, "\n".join(descriptions)
+            return triggered_signals, "\\n".join(descriptions)
         except Exception as e:
             return [], f"卖出评估出错: {e}"
 

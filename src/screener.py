@@ -51,11 +51,15 @@ class Screener:
         except Exception as e:
             return True, f"估值分析跳过: {e}"
 
-    def screen_technical(self, symbol, target_date=None, mode='value'):
+    def screen_technical(self, symbol, target_date=None, mode='value', rs_score=0):
         """
-        Technical Screen with Dual Engines:
-        mode 'value': Fundamental Pullback (缩量回踩 EMA20/30) - For white horses.
-        mode 'momentum': Breakout/Surge (近5日异动大阳线) - For hot sectors.
+        Technical Screen with All-Weather Engines:
+        mode 'value': Fundamental Pullback (缩量回踩 EMA20/30)
+        mode 'momentum': Breakout/Surge (近5日异动大阳线，若 RS 极高允许直接追涨)
+        mode 'oscillation': Bollinger Bands (布林带下轨企稳)
+        mode 'dividend_defense': 阴跌防御 (年线之上，低波动)
+        mode 'slow_rise': 均线骑乘 (EMA10>EMA20>EMA60，贴近EMA10)
+        mode 'defensive': 熊市超跌反弹
         """
         try:
             df = fetch_a_stock_hist_cached(symbol, period="daily", adjust="qfq", expiry_hours=24)
@@ -66,7 +70,6 @@ class Screener:
 
             if df.empty or len(df) < 60: return False, "数据不足60天"
             
-            # 流动性基础过滤：近5日平均成交额大于 5000 万
             avg_turnover_5d = df.iloc[-5:]['成交额'].mean()
             if avg_turnover_5d < 50_000_000:
                 return False, f"流动性不足 (日均成交<5000万)"
@@ -74,108 +77,132 @@ class Screener:
             latest_price = df.iloc[-1]['收盘']
             latest_vol = df.iloc[-1]['成交量']
             
-            # 使用 EMA 替代 SMA (反应更灵敏)
+            df['ema10'] = df['收盘'].ewm(span=10, adjust=False).mean()
             df['ema20'] = df['收盘'].ewm(span=20, adjust=False).mean()
             df['ema60'] = df['收盘'].ewm(span=60, adjust=False).mean()
             
+            ema10 = df['ema10'].iloc[-1]
             ema20 = df['ema20'].iloc[-1]
             ema60 = df['ema60'].iloc[-1]
             vol_ma5 = df.iloc[-5:]['成交量'].mean()
             
-            # MACD 计算
+            # MACD
             ema12 = df['收盘'].ewm(span=12, adjust=False).mean()
             ema26 = df['收盘'].ewm(span=26, adjust=False).mean()
             diff = ema12 - ema26
             dea = diff.ewm(span=9, adjust=False).mean()
             macd = 2 * (diff - dea)
-            
             latest_macd = macd.iloc[-1]
             prev_macd = macd.iloc[-2]
+            
+            # RSI
+            delta = df['收盘'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            df['rsi_14'] = 100 - (100 / (1 + rs))
+            latest_rsi = df['rsi_14'].iloc[-1]
 
             if mode == 'value':
-                # 白马回踩引擎：EMA60向上，近期回调到 EMA20 附近 且 显著缩量，且 MACD 未死叉或正处于金叉初期
                 ema60_prev = df['ema60'].iloc[-10]
                 is_uptrend = ema60 > ema60_prev or latest_price > ema60
-                
                 bias_ema20 = abs(latest_price - ema20) / ema20
-                is_pullback = bias_ema20 < 0.03  # 距离EMA20不到3%
-                is_shrinking = latest_vol < vol_ma5 * 0.8 # 明显缩量
-                
-                # MACD 辅助确认：红柱放大或绿柱缩短
+                is_pullback = bias_ema20 < 0.03
+                is_shrinking = latest_vol < vol_ma5 * 0.8
                 macd_ok = latest_macd > prev_macd
-                
                 if is_uptrend and is_pullback and is_shrinking and macd_ok:
-                    return True, f"价值引擎: 缩量回踩 EMA20 企稳 (MACD动能改善)"
+                    return True, f"价值引擎: 缩量回踩 EMA20 企稳"
                 else:
                     return False, "未满足缩量回踩或MACD走弱"
                     
             elif mode == 'momentum':
-                # 游资异动引擎（改良版）：近期(2-5日内)有标志性突破放量大阳线，但目前处于缩量回踩阶段，避免高位接盘
                 recent_5d = df.iloc[-5:]
                 recent_30d_vol_avg = df.iloc[-30:]['成交量'].mean()
-                
-                breakout_idx = -1
                 breakout_row = None
                 
-                # 从过去5日数据中（不包含今天）寻找标志性放量突破大阳线
                 for i in range(len(recent_5d) - 1):
                     row = recent_5d.iloc[i]
                     pct_change = (row['收盘'] - row['开盘']) / row['开盘']
                     vol_ratio = row['成交量'] / recent_30d_vol_avg
                     if pct_change > 0.05 and vol_ratio > 1.5:
-                        breakout_idx = i
                         breakout_row = row
                         break
                 
-                # 如果没有近期突破，或者突破发生在今天（代表今天正在暴涨，只有低位首板才允许买入）
+                # 特批：如果 RS 极强，且出现大阳线，允许直接追涨不回踩
+                latest_row = df.iloc[-1]
+                latest_pct = (latest_row['收盘'] - latest_row['开盘']) / latest_row['开盘']
+                latest_vol_ratio = latest_row['成交量'] / recent_30d_vol_avg
+                
+                if rs_score > 0.15 and latest_pct > 0.04 and latest_vol_ratio > 1.5:
+                    return True, f"🐲 龙头逼空战法: RS极强且放量突破，直接追涨！"
+                
                 if breakout_row is None:
-                    latest_row = recent_5d.iloc[-1]
-                    pct_change = (latest_row['收盘'] - latest_row['开盘']) / latest_row['开盘']
-                    vol_ratio = latest_row['成交量'] / recent_30d_vol_avg
-                    if pct_change > 0.05 and vol_ratio > 1.5:
-                        # 检查今天是否离均线过远 (比如偏离 EMA10 > 6% 代表追高)
-                        df['ema10'] = df['收盘'].ewm(span=10, adjust=False).mean()
-                        ema10 = df['ema10'].iloc[-1]
+                    if latest_pct > 0.05 and latest_vol_ratio > 1.5:
                         bias_ema10 = (latest_price - ema10) / ema10
                         if bias_ema10 <= 0.06 and latest_macd > 0:
-                            return True, f"游资引擎 (日内异动): 今日低位放量首板启动 (MACD多头)"
-                    return False, "缺乏近期资金突破或今日已涨幅过高"
+                            return True, f"游资引擎 (日内异动): 低位放量首板启动"
+                    return False, "缺乏近期资金突破或未达逼空标准"
                 
-                # 存在近期突破大阳线，判断今天是否是“缩量回踩”
-                # 1. 今天收盘价高于 EMA10 (趋势仍在)
-                df['ema10'] = df['收盘'].ewm(span=10, adjust=False).mean()
-                ema10 = df['ema10'].iloc[-1]
                 is_above_support = latest_price > ema10
-                
-                # 2. 今天收盘价低于或等于突破日收盘价，或者处于突破高点的小幅回撤区间（防连续暴涨）
                 is_pullback = latest_price <= breakout_row['收盘'] * 1.02
-                
-                # 3. 今天成交量显著缩量（成交量小于 5 日均量，且小于突破日成交量的 70%）
                 is_shrinking = latest_vol < vol_ma5 and latest_vol < breakout_row['成交量'] * 0.7
                 
                 if is_above_support and is_pullback and is_shrinking and latest_macd > 0:
-                    return True, f"游资引擎 (回踩买点): 近期异动大阳线后缩量回踩 EMA10 (MACD多头)"
+                    return True, f"游资引擎: 异动后缩量回踩 EMA10"
                 else:
-                    return False, "突破后未缩量或股价未能企稳回踩"
+                    return False, "突破后未缩量或未能企稳回踩"
                     
+            elif mode == 'oscillation':
+                # 布林带网格战法
+                df['ma20'] = df['收盘'].rolling(window=20).mean()
+                df['std20'] = df['收盘'].rolling(window=20).std()
+                df['lower_band'] = df['ma20'] - (2 * df['std20'])
+                lower_band = df['lower_band'].iloc[-1]
+                
+                # 触及下轨且有企稳迹象 (RSI回暖)
+                is_near_lower = latest_price <= lower_band * 1.02
+                macd_improving = latest_macd > prev_macd
+                
+                if is_near_lower and macd_improving and latest_rsi > 30:
+                    return True, f"网格引擎: 触及布林带下轨企稳，高抛低吸介入点"
+                return False, "未触及下轨或动能未企稳"
+                
+            elif mode == 'dividend_defense':
+                # 阴跌防御：必须在长牛均线之上(年线)，且波动率低
+                df['ma250'] = df['收盘'].rolling(window=250).mean()
+                if len(df) >= 250:
+                    ma250 = df['ma250'].iloc[-1]
+                    if latest_price < ma250:
+                        return False, "阴跌防御要求股价在年线之上"
+                
+                # 检查波动率
+                std20 = df['收盘'].rolling(window=20).std().iloc[-1]
+                volatility = std20 / latest_price
+                if volatility > 0.03: # 波动过大不适合红利防守
+                    return False, "波动率过大，不适合红利防守"
+                    
+                if latest_price > ema10:
+                    return True, f"红利防御: 趋势平稳且波动率极低，稳健介入"
+                return False, "趋势未站上EMA10"
+                
+            elif mode == 'slow_rise':
+                # 慢涨骑乘：均线多头排列，且未加速
+                if ema10 > ema20 and ema20 > ema60 and latest_price > ema10:
+                    bias_ema10 = (latest_price - ema10) / ema10
+                    # 贴近均线，没有乖离过大
+                    if bias_ema10 < 0.04 and latest_vol <= vol_ma5 * 1.2:
+                        return True, f"慢涨骑乘: 多头排列且贴近均线稳步上行"
+                return False, "未形成慢涨多头排列或已加速放量"
+
             elif mode == 'defensive':
-                # 熊市防守引擎 (超跌反弹)：只买入被极度错杀的绩优股
                 df['ma20'] = df['收盘'].rolling(window=20).mean()
                 bias_ma20 = (latest_price - df['ma20'].iloc[-1]) / df['ma20'].iloc[-1]
-                
-                delta = df['收盘'].diff()
-                gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-                loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-                rs = gain / loss
-                df['rsi_14'] = 100 - (100 / (1 + rs))
-                latest_rsi = df['rsi_14'].iloc[-1]
-                
                 macd_improving = latest_macd > prev_macd
                 
                 if (bias_ma20 < -0.15 or latest_rsi < 30) and macd_improving:
-                    return True, f"左侧防守引擎 (超跌反弹): 严重超跌 (RSI: {latest_rsi:.1f}, BIAS: {bias_ma20*100:.1f}%) 且 MACD 动能改善"
+                    return True, f"左侧防守: 严重超跌 (RSI: {latest_rsi:.1f}) 且 MACD 改善"
                 else:
-                    return False, f"未达到极度恐慌区间或未企稳 (RSI: {latest_rsi:.1f}, BIAS: {bias_ma20*100:.1f}%)"
+                    return False, f"未达到极度恐慌区间"
                     
             return False, "未知模式"
         except Exception as e:
@@ -240,10 +267,10 @@ class Screener:
 
         return None
 
-    def screen_a_share(self, symbol, df, min_roe=None):
+    def screen_a_share(self, symbol, df, min_roe=None, mode=None):
         """
         Screen A-share based on abstract data.
-        Indicators: ROE, Growth Trend, Cash-to-Profit Ratio.
+        Indicators: ROE, Growth Trend, Cash-to-Profit Ratio, Dividend.
         """
         if df is None or df.empty:
             return False, "无数据"
@@ -274,7 +301,7 @@ class Screener:
             
             latest_roe = roe_list[0] if roe_list else None
             
-            # 根据财报公布期进行年化处理（解决一季报、半年报等非年度指标偏低导致被误杀的问题）
+            # 根据财报公布期进行年化处理
             latest_date = str(df.columns[2]) if len(df.columns) > 2 else ""
             roe_multiplier = 1.0
             quarter_name = "年报"
@@ -288,16 +315,24 @@ class Screener:
                 roe_multiplier = 4.0 / 3.0
                 quarter_name = "三季报(已年化)"
                 
-            if latest_roe is not None:
-                annualized_roe = latest_roe * roe_multiplier
-                if annualized_roe >= target_roe:
-                    reasons.append(f"ROE: {round(annualized_roe, 2)}% ({quarter_name})")
+            # 模式特判：红利防御模式不看ROE，只看股息和市净率
+            if mode == 'dividend_defense':
+                if latest_roe is not None and latest_roe > 0:
+                    reasons.append(f"红利模式基本面(ROE>0): {round(latest_roe, 2)}%")
                 else:
                     passed = False
-                    reasons.append(f"ROE不达标: {round(annualized_roe, 2)}% ({quarter_name}, 要求>={target_roe}%)")
+                    reasons.append(f"红利模式要求不亏损，当前ROE: {latest_roe}")
             else:
-                passed = False
-                reasons.append("无有效ROE数据")
+                if latest_roe is not None:
+                    annualized_roe = latest_roe * roe_multiplier
+                    if annualized_roe >= target_roe:
+                        reasons.append(f"ROE: {round(annualized_roe, 2)}% ({quarter_name})")
+                    else:
+                        passed = False
+                        reasons.append(f"ROE不达标: {round(annualized_roe, 2)}% ({quarter_name}, 要求>={target_roe}%)")
+                else:
+                    passed = False
+                    reasons.append("无有效ROE数据")
 
             # 2. 增长斜率 (归母净利润同比)
             growth_list = get_series('归母净利润同比增长')

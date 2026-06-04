@@ -25,13 +25,11 @@ class MarketMonitor:
 
 
     def check_market_light(self, target_date=None):
-        """红绿灯系统：根据大盘与中证500(中小盘赚钱效应)判断市场环境"""
-        # 使用沪深300 sh000300 代表权重
+        """红绿灯系统：根据大盘与中证500(中小盘赚钱效应)判断市场环境 (5大Regime)"""
         df_300 = fetch_market_index("sh000300")
-        # 使用中证500 sh000905 代表中小盘活跃度(赚钱效应代理)
         df_500 = fetch_market_index("sh000905")
         
-        if df_300 is None or df_300.empty: return "YELLOW", "数据获取失败，默认建议仓位: 30%"
+        if df_300 is None or df_300.empty: return "YELLOW", "数据获取失败，默认建议仓位: 30%", "OSCILLATION"
         
         if target_date:
             df_300['date'] = pd.to_datetime(df_300['date'])
@@ -39,7 +37,7 @@ class MarketMonitor:
             if df_500 is not None and not df_500.empty:
                 df_500['date'] = pd.to_datetime(df_500['date'])
                 df_500 = df_500[df_500['date'] <= pd.to_datetime(target_date)]
-            if df_300.empty: return "YELLOW", f"找不到 {target_date} 之前的数据"
+            if df_300.empty: return "YELLOW", f"找不到 {target_date} 之前的数据", "OSCILLATION"
 
         latest_price = df_300.iloc[-1]['close']
         ma20 = df_300.iloc[-20:]['close'].mean()
@@ -49,7 +47,6 @@ class MarketMonitor:
         is_uptrend = latest_price > ma20
         is_expanding_vol = latest_vol > vol_ma5
         
-        # 中小盘赚钱效应代理 (CSI 500 > MA20)
         has_breadth = False
         if df_500 is not None and len(df_500) >= 20:
             latest_500 = df_500.iloc[-1]['close']
@@ -58,18 +55,18 @@ class MarketMonitor:
         
         if is_uptrend:
             if is_expanding_vol:
-                return "GREEN", f"🟢 多头环境且放量 (沪深300>MA20, 量>5日均量)，建议重仓 (仓位: 80%)"
+                return "GREEN", f"🟢 狂牛环境且放量 (沪深300>MA20, 量>5日均量)，建议重仓 (仓位: 80%)", "EXTREME_BULL"
             else:
                 if has_breadth:
-                    return "GREEN", f"🟢 沪深300缩量但中证500活跃(存在结构性赚钱效应)，允许游资出击 (仓位: 60%)"
-                return "YELLOW", f"🟡 多头环境但缩量 (动能不足)，建议观望或轻仓 (仓位: 30%)"
+                    return "GREEN", f"🟢 慢涨环境 (中小盘活跃)，稳步爬升 (仓位: 60%)", "SLOW_RISE"
+                return "YELLOW", f"🟡 震荡缩量环境 (动能不足)，建议高抛低吸 (仓位: 30%)", "OSCILLATION"
         else:
             if is_expanding_vol:
-                return "RED", f"🔴 空头环境且放量下跌，风险极大，建议空仓避险 (仓位: 0%)"
+                return "RED", f"🔴 极度熊市放量下跌，风险极大，建议空仓避险 (仓位: 0%)", "EXTREME_BEAR"
             else:
                 if has_breadth:
-                    return "YELLOW", f"🟡 权重护盘不力但中小盘活跃(题材行情)，建议轻仓参与题材 (仓位: 30%)"
-                return "YELLOW", f"🟡 空头环境但缩量下跌 (存在止跌惜售迹象)，建议观望 (仓位: 30%)"
+                    return "YELLOW", f"🟡 震荡回调(中小盘活跃)，高抛低吸参与题材 (仓位: 30%)", "OSCILLATION"
+                return "YELLOW", f"🟡 阴跌环境，缩量寻底，全面切入红利防御 (仓位: 30%)", "SLOW_DECLINE"
 
     def check_hk_market_light(self, target_date=None):
         from src.data_fetcher import fetch_hk_market_index
@@ -191,10 +188,11 @@ class MarketMonitor:
             print("⚠️ 警告: 根目录未发现 .env 文件，AI 点评功能将无法完整运行。请参考 .env.example 配置。")
 
         # 0. 大盘红绿灯
-        light, light_msg = self.check_market_light(target_date)
+        light, light_msg, regime = self.check_market_light(target_date)
         print(f"🚦 大盘红绿灯: {light} - {light_msg}")
         
-        is_bear_market = (light == "RED" or "空头环境" in light_msg)
+        is_bear_market = (light == "RED" or regime == "EXTREME_BEAR")
+        print(f"🌦️ 当前细分市场气候: {regime}")
         if is_bear_market:
             print("🌧️ 识别为熊市环境，已开启大盘防守开关，全系统切换至 [左侧防守引擎 (超跌反弹)] 模式")
 
@@ -285,7 +283,7 @@ class MarketMonitor:
                     scanned_symbols[symbol] = {'name': name, 'sectors': [sector_name]}
                 
                 # A. 卖出信号检查
-                exit_signals, exit_desc = self.risk.evaluate_exit_signals(symbol, target_date=target_date)
+                exit_signals, exit_desc = self.risk.evaluate_exit_signals(symbol, target_date=target_date, regime=regime)
                 if exit_signals:
                     sell_warnings.append({"name": name, "symbol": symbol, "desc": exit_desc})
 
@@ -301,25 +299,35 @@ class MarketMonitor:
                     print(f"  - {name} ({symbol}) 估值过高: {v_detail}")
                     continue
 
-                # 策略改进：双引擎解耦 (加入牛熊双轨切换)
-                if is_bear_market:
+                # 策略改进：全天候 5 引擎自适应切换
+                if regime == "EXTREME_BEAR":
                     target_roe = 5.0  # 熊市防守，要求极高的基本面
                     tech_mode = 'defensive'
-                elif sector_type == '潜伏蓄势':
+                elif regime == "SLOW_DECLINE":
+                    target_roe = 0.0 # 放宽基本面，看重股息
+                    tech_mode = 'dividend_defense'
+                elif regime == "OSCILLATION":
                     target_roe = 5.0
-                    tech_mode = 'value'
-                else:
-                    target_roe = 3.0 # 热门股放宽基本面要求
-                    tech_mode = 'momentum'
+                    tech_mode = 'oscillation'
+                elif regime == "SLOW_RISE":
+                    target_roe = 5.0
+                    tech_mode = 'slow_rise'
+                else: # EXTREME_BULL
+                    if sector_type == '潜伏蓄势':
+                        target_roe = 5.0
+                        tech_mode = 'value'
+                    else:
+                        target_roe = 3.0 # 热门股放宽基本面要求
+                        tech_mode = 'momentum'
                 
                 financials = fetch_a_stock_financials(symbol)
-                f_pass, f_detail = self.screener.screen_a_share(symbol, financials, min_roe=target_roe)
+                f_pass, f_detail = self.screener.screen_a_share(symbol, financials, min_roe=target_roe, mode=tech_mode)
                 
                 if not f_pass:
                     print(f"  - {name} ({symbol}) 基本面未过: {f_detail}")
                     continue
 
-                t_pass, t_detail = self.screener.screen_technical(symbol, target_date=target_date, mode=tech_mode)
+                t_pass, t_detail = self.screener.screen_technical(symbol, target_date=target_date, mode=tech_mode, rs_score=rs_score)
                 if t_pass:
                     suggested_pos = self.risk.calculate_position_size(symbol, target_date=target_date)
                     pos_str = f"{round(suggested_pos * 100, 1)}%"
