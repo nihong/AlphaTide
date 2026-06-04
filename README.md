@@ -56,19 +56,26 @@ AlphaTide 是一个全自动化的 AI 投资决策支持系统，专门设计用
 ```text
 ├── main.py                # 系统启动入口
 ├── AGENTS.md              # AI 智能体指令集（跨模型记忆）
-├── reports/               # 每日生成的决策日报 (Markdown)
-│   └── master_summary.md  # 自动更新的历史策略总览看板
+├── reports/               # 每日决策日报与输出目录
+│   ├── master_summary.md  # 自动更新的历史策略总览看板
+│   ├── strategy_audit_report.md # 策略审计报告
+│   └── logs/              # 终端执行日志归档
+├── tests/                 # 测试与回测时光机基建
+│   ├── backtest_30d.py    # 近期小样本快速质检仪
+│   ├── backtest_6y.py     # 跨越牛熊全周期压力测试机
+│   └── backtest_result.json # 回测输出数据
+├── scripts/               # 自动化批处理与独立验证脚本
 ├── history/               # 行业蓄势指数历史数据
-├── src/
-│   ├── market_monitor.py  # 核心监控大脑
-│   ├── data_fetcher.py    # 数据采集与缓存层
+├── src/                   # 核心业务逻辑架构
+│   ├── market_monitor.py  # 核心监控大脑与双轨切换总控
+│   ├── data_fetcher.py    # 数据采集、反爬与本地缓存层
 │   ├── rotation_predictor.py # 行业轮动预测
-│   ├── screener.py        # 财务/技术筛选引擎
-│   ├── risk_manager.py    # RS强度与卖出预警
-│   ├── ai_analyst.py      # DeepSeek API 接入
+│   ├── screener.py        # 财务/技术双轨筛选防守引擎
+│   ├── risk_manager.py    # RS强度与动态吊灯三轨卖出预警
+│   ├── ai_analyst.py      # DeepSeek 核心点评与分析
 │   ├── history_manager.py # 历史记忆管理
 │   └── report_summarizer.py # 历史报告自动提取与汇总
-└── .env                   # 隐私配置文件（API Key）
+└── .env                   # 隐私配置文件（API Key，不提交）
 ```
 
 ## 🚀 快速启动
