@@ -46,7 +46,7 @@ def main():
     # 2. Screen
     screener = Screener()
     if market == "A":
-        pass_status = screener.screen_a_share(data)
+        pass_status = screener.screen_a_share(symbol, data)
     else:
         pass_status = screener.screen_hk_share(data)
 
