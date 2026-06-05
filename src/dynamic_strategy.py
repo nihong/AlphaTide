@@ -12,5 +12,5 @@ def generate_signals(df):
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     atr = tr.rolling(14).mean()
     
-    stop_distance = atr * 3.50
+    stop_distance = atr * 3.60
     return buy_signal, stop_distance
