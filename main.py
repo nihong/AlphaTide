@@ -1,72 +1,37 @@
-import argparse
-import os
-from dotenv import load_dotenv
+import time
+from brain_nlp import NLPBrain
+from falsification_filter import FalsificationFilter
+from capital_flow_voter import CapitalFlowVoter
+from execution_engine import ExecutionEngine
 
-# Load environment variables from .env file
-load_dotenv()
-
-from src.data_fetcher import fetch_a_stock_financials, fetch_hk_stock_financials
-from src.screener import Screener
-from src.ai_analyst import AIAnalyst
-
-def main():
-    parser = argparse.ArgumentParser(description="AlphaTide: AI Investment Pipeline")
-    parser.add_argument("--market", type=str, default="A", choices=["A", "HK"], help="Market to screen (A or HK)")
-    parser.add_argument("--symbol", type=str, help="Specific stock symbol to analyze")
-    parser.add_argument("--auto", action="store_true", help="Run the full automated daily monitoring pipeline")
-    parser.add_argument("--date", type=str, help="Target date for historical backtesting (e.g., '2024-03-01')")
-    parser.add_argument("--fast", action="store_true", help="Fast mode: Skip LLM analysis for faster backtesting")
-    parser.add_argument("--diamond", action="store_true", help="Run the long-term Diamond Hands lurker pipeline")
-    args = parser.parse_args()
-
-    if args.diamond:
-        from src.long_term_monitor import LongTermMonitor
-        monitor = LongTermMonitor()
-        monitor.run_diamond_scan()
-        return
-
-    if args.auto:
-        from src.market_monitor import MarketMonitor
-        monitor = MarketMonitor()
-        monitor.run_daily_scan(target_date=args.date, market=args.market, fast_mode=args.fast)
-        return
-
-    market = args.market
-    symbol = args.symbol
+def run_pipeline():
+    print("==================================================")
+    print("🌊 ALPHATIDE V4.0 - PIPELINE INITIATED")
+    print("==================================================")
     
-    # Default symbols for testing if none provided
-    if not symbol:
-        symbol = "600519" if market == "A" else "00700"
-
-    print(f"🚀 Starting analysis for {symbol} in {market} market...")
-
-    # 1. Fetch Data
-    if market == "A":
-        data = fetch_a_stock_financials(symbol)
-    else:
-        data = fetch_hk_stock_financials(symbol)
-
-    if data is None or data.empty:
-        print("❌ Error: Could not fetch data.")
-        return
-
-    # 2. Screen
-    screener = Screener()
-    if market == "A":
-        pass_status = screener.screen_a_share(symbol, data)
-    else:
-        pass_status = screener.screen_hk_share(data)
-
-    print(f"📊 Screening Result: {pass_status}")
-
-    # 3. AI Summary
-    analyst = AIAnalyst()
-    report_prompt = analyst.generate_report_prompt(symbol, market, data, pass_status)
+    # 1. AI Brain (Idea Generation)
+    brain = NLPBrain()
+    ideas = brain.update_watchlist()
     
-    print("\n--- AI Analysis Prompt Generated ---")
-    print(report_prompt)
-    print("-------------------------------------")
-    print("✅ Pipeline complete. You can now feed the above prompt to your preferred AI.")
+    # 2. Truth Filter (Alternative Data)
+    filter_engine = FalsificationFilter()
+    survivors = filter_engine.filter_watchlist()
+    
+    if not survivors:
+        print("\\n[Pipeline] 🛑 All ideas killed by Truth Filter. Macro environment hostile. Aborting day.")
+        return
+        
+    # 3. Capital Flow Voter (Smart Money Confirmation)
+    voter = CapitalFlowVoter()
+    final_targets = voter.vote(survivors)
+    
+    # 4. Execution (Buy/Sell/Stop-loss)
+    execution = ExecutionEngine()
+    execution.execute_trades(final_targets)
+    
+    print("==================================================")
+    print("🏁 ALPHATIDE V4.0 - PIPELINE COMPLETE")
+    print("==================================================")
 
 if __name__ == "__main__":
-    main()
+    run_pipeline()
