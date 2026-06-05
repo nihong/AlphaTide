@@ -42,7 +42,22 @@ def update_readme(version, total_trades, win_rate, avg_profit, max_drawdown, df)
     if 'profit_pct_str' not in df_md.columns:
         df_md['profit_pct_str'] = df_md['profit_pct'].apply(lambda x: f"{x:.2%}")
         df_md['raw_long_str'] = df_md['raw_long'].apply(lambda x: f"{x:.2%}")
-    trade_table = df_md[['buy_date', 'sell_date', 'symbol', 'strategy', 'sell_reason', 'raw_long_str', 'profit_pct_str']].to_markdown(index=False)
+        df_md['idx_return_str'] = df_md['idx_return'].apply(lambda x: f"{x:.2%}")
+        
+    rename_cols = {
+        'buy_date': '买入日期',
+        'sell_date': '卖出日期',
+        'symbol': '股票代码',
+        'strategy': '执行策略',
+        'sell_reason': '平仓原因',
+        'raw_long_str': '个股单边收益',
+        'idx_return_str': '同期大盘涨跌',
+        'profit_pct_str': '对冲后净收益'
+    }
+    df_md.rename(columns=rename_cols, inplace=True)
+    
+    display_cols = ['买入日期', '卖出日期', '股票代码', '执行策略', '平仓原因', '个股单边收益', '同期大盘涨跌', '对冲后净收益']
+    trade_table = df_md[display_cols].to_markdown(index=False)
     
     report = f"""
 # 💎 Top-1 基金经理级别：全天候对冲钻石策略 (V{version})
@@ -147,7 +162,11 @@ def run_v2_hedged_backtest(version="2.0"):
             if i >= idx_future.index[0] + 60:
                 idx_sell_price = row['收盘']
                 break
-        hedge_return = (idx_buy_price - idx_sell_price) / idx_buy_price # 做空收益
+        
+        # 做空收益 = (买入价 - 卖出价)/买入价
+        # 大盘绝对涨跌 = (卖出价 - 买入价)/买入价
+        hedge_return = (idx_buy_price - idx_sell_price) / idx_buy_price 
+        idx_return = (idx_sell_price - idx_buy_price) / idx_buy_price
         
         for symbol, data in db.items():
             # 获取当前年月
@@ -224,7 +243,8 @@ def run_v2_hedged_backtest(version="2.0"):
                 'symbol': symbol,
                 'strategy': strat,
                 'profit_pct': total_return,
-                'raw_long': long_return
+                'raw_long': long_return,
+                'idx_return': idx_return
             })
             
     df = pd.DataFrame(results)
@@ -249,15 +269,16 @@ def run_v2_hedged_backtest(version="2.0"):
         # 导出具体买卖明细
         df['profit_pct_str'] = df['profit_pct'].apply(lambda x: f"{x:.2%}")
         df['raw_long_str'] = df['raw_long'].apply(lambda x: f"{x:.2%}")
+        df['idx_return_str'] = df['idx_return'].apply(lambda x: f"{x:.2%}")
         df.to_csv("reports/v2_trades_detail.csv", index=False)
         print("\n📈 最近三年买卖明细 (2024-2026):")
         recent_df = df[df['buy_date'] >= '2024-01-01']
-        print(recent_df[['buy_date', 'sell_date', 'symbol', 'strategy', 'sell_reason', 'raw_long_str', 'profit_pct_str']].to_markdown())
+        print(recent_df[['buy_date', 'sell_date', 'symbol', 'strategy', 'sell_reason', 'raw_long_str', 'idx_return_str', 'profit_pct_str']].to_markdown())
         
         print("\n🏆 HK 港股触发明细:")
         hk_df = df[df['symbol'].str.startswith('0') & (df['symbol'].str.len() == 5)]
         if not hk_df.empty:
-            print(hk_df[['buy_date', 'sell_date', 'symbol', 'strategy', 'sell_reason', 'raw_long_str', 'profit_pct_str']].to_markdown())
+            print(hk_df[['buy_date', 'sell_date', 'symbol', 'strategy', 'sell_reason', 'raw_long_str', 'idx_return_str', 'profit_pct_str']].to_markdown())
         else:
             print("未能成功触发港股交易，或港股接口被拒。")
         
