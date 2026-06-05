@@ -11,6 +11,7 @@ from src.ai_analyst import AIAnalyst
 from src.sentiment_engine import SentimentEngine
 from src.risk_manager import RiskManager
 from src.macro_engine import MacroEngine
+from src.industry_validator import IndustryValidator
 
 
 class MarketMonitor:
@@ -22,6 +23,7 @@ class MarketMonitor:
         self.risk = RiskManager()
         self.sentiment = SentimentEngine()
         self.macro = MacroEngine()
+        self.validator = IndustryValidator()
 
 
     def check_market_light(self, target_date=None):
@@ -251,6 +253,20 @@ class MarketMonitor:
                 sectors_to_scan.append({'name': name, 'label': label, 'type': '动量热门', 'is_new': is_new})
             print(f"🔥 锁定 Top 3 热门板块: {[s['name'] for s in sectors_to_scan if s['type'] == '动量热门']}")
 
+        # 注入宏观验证防线 (Macro-Validated Pool)
+        print("\n🔎 [启动宏观打假引擎] 验证本地行业库...")
+        self.validator.run_eviction_check()
+        macro_sectors = self.validator.active_sectors
+        for sec_name, sec_info in macro_sectors.items():
+            sectors_to_scan.append({
+                'name': sec_name, 
+                'label': None, 
+                'type': '宏观验证(券商看多+数据走强)', 
+                'is_new': False,
+                'macro_reason': sec_info.get("reason", "")
+            })
+            print(f"🛡️ 纳入宏观验证板块: {sec_name} ({sec_info.get('reason')})")
+
         # 记录今日板块数据以便后续识别“新晋”
         current_stats = {s['name']: 100 for s in sectors_to_scan}
         self.history.record_daily_stats(current_stats)
@@ -361,6 +377,10 @@ class MarketMonitor:
         # 4. 汇总与共振加分
         for symbol, data in scanned_symbols.items():
             if data.get('passed'):
+                # 检查是否包含宏观验证标签
+                is_macro_validated = any(s in [sec['name'] for sec in sectors_to_scan if sec['type'].startswith('宏观验证')] for s in data['sectors'])
+                macro_tag = " 🛡️ [宏观护体(戴维斯双击)]" if is_macro_validated else ""
+                
                 resonance_str = " | ".join(data['sectors'])
                 resonance_bonus = "🌟 (题材共振)" if len(data['sectors']) > 1 else ""
                 
@@ -368,7 +388,7 @@ class MarketMonitor:
                 is_new_resonance = any(s in [sec['name'] for sec in sectors_to_scan if sec['is_new']] for s in data['sectors'])
                 new_tag = " 🔥 [新题材!]" if is_new_resonance else ""
                 
-                print(f"✨ 发现优质标的: {data['name']} ({symbol}) {resonance_bonus}{new_tag} | RS强度: {round(data['rs_score'], 2)}")
+                print(f"✨ 发现优质标的: {data['name']} ({symbol}) {resonance_bonus}{new_tag}{macro_tag} | RS强度: {round(data['rs_score'], 2)}")
                 
                 if fast_mode:
                     ai_insight = "Fast Mode: LLM Skipped"
@@ -379,11 +399,11 @@ class MarketMonitor:
                 recommendations.append({
                     "name": data['name'],
                     "symbol": symbol,
-                    "sector": resonance_str + " " + resonance_bonus + new_tag,
+                    "sector": resonance_str + " " + resonance_bonus + new_tag + macro_tag,
                     "reason": f"{data['f_detail']} | {data['t_detail']} | RS强度: {round(data['rs_score'], 2)}",
                     "position": data['pos_str'],
                     "ai_insight": ai_insight,
-                    "resonance_count": len(data['sectors'])
+                    "resonance_count": len(data['sectors']) + (2 if is_macro_validated else 0) # 宏观验证权重极高，直接+2
                 })
                 
         recommendations.sort(key=lambda x: x['resonance_count'], reverse=True)
