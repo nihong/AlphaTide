@@ -59,18 +59,33 @@ class CapitalFlowVoter:
         return pd.DataFrame()
 
     def check_sector_resonance(self):
-        """Check if broad growth/tech index (ChiNext 159915) is in uptrend."""
-        df = self.fetch_stock_data_with_retry("159915", retries=2)
-        if df.empty or len(df) < 20:
-            return True # Default to true if api fails
-        df['price_ma20'] = df['收盘'].rolling(20).mean()
+        """
+        Check if the broad market index (e.g., CSI 300 / ChiNext) is in an uptrend.
+        Returns: (is_tradable: bool, regime: str)
+        regime can be 'BULL', 'NEUTRAL', or 'BEAR'
+        """
+        # Using ChiNext ETF (159915) or CSI 300 ETF (510300) as proxy
+        proxy_symbol = "510300"
+        df = self.fetch_stock_data_with_retry(proxy_symbol)
+        
+        if df.empty or len(df) < 60:
+            return True, "NEUTRAL" # Default to tradable if we can't fetch
+            
+        df['ma20'] = df['收盘'].rolling(20).mean()
+        df['ma60'] = df['收盘'].rolling(60).mean()
         latest = df.iloc[-1]
-        if latest['收盘'] > latest['price_ma20']:
-            print("  -> 🌊 Sector Resonance: Broad Growth Index is SURGING.")
-            return True
-        else:
-            print("  -> 🛑 Sector Resonance: Broad Growth Index is WEAK.")
-            return False
+        
+        # Bull: Price above MA20 and MA60
+        if latest['收盘'] >= latest['ma20'] and latest['收盘'] >= latest['ma60']:
+            return True, "BULL"
+        
+        # Bear: Price deeply below MA60
+        if latest['收盘'] < latest['ma60']:
+            print(f"  -> 🐻 Macro Regime is BEAR. Broad Index ({proxy_symbol}) below 60-day MA.")
+            return False, "BEAR"
+            
+        print("  -> 🛑 Sector Resonance: Broad Index is WEAK. Long positions restricted.")
+        return False, "NEUTRAL"
 
     def check_smart_money(self, symbol):
         df = self.fetch_stock_data_with_retry(symbol)
@@ -106,7 +121,7 @@ class CapitalFlowVoter:
         print(f"[Flow Voter] 🗳️ Initiating Capital Flow Voting & Cross-Sectional Ranking for {len(candidates)} candidates...")
         
         # Sector Resonance Check
-        resonance = self.check_sector_resonance()
+        resonance, regime = self.check_sector_resonance()
         
         scored_candidates = []
         for stock in candidates:
@@ -126,6 +141,15 @@ class CapitalFlowVoter:
         approved = scored_candidates[:3]
                 
         print(f"[Flow Voter] 🏆 {len(approved)} stocks passed and ranked as Top Tier targets.")
+        
+        # In BEAR regime, if no longs pass, we might return a special short signal
+        if regime == "BEAR" and len(approved) == 0:
+            return [{"symbol": "510300", "theme": "Macro Short Hedge", "direction": "SHORT"}]
+            
+        # Ensure default direction is LONG
+        for target in approved:
+            target['direction'] = "LONG"
+            
         return approved
 
 if __name__ == "__main__":

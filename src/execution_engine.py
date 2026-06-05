@@ -35,6 +35,7 @@ class ExecutionEngine:
         symbols_to_remove = []
         
         for sym, data in positions.items():
+            direction = data.get("direction", "LONG")
             df = self.price_fetcher.fetch_stock_data_with_retry(sym, retries=2)
             if df.empty:
                 print(f"  -> ⚠️ Could not fetch current price for {sym}. Skipping stop-loss check.")
@@ -42,25 +43,45 @@ class ExecutionEngine:
                 
             latest = df.iloc[-1]
             current_price = latest['收盘']
-            
-            # Trailing Stop Logic: If current price - ATR*2 is higher than old stop_loss, raise the stop_loss
             atr = self.calculate_atr(sym)
-            potential_new_stop = current_price - (atr * 2.0)
-            if potential_new_stop > data["stop_loss"]:
-                data["stop_loss"] = potential_new_stop
-                print(f"  -> 🛡️ {sym} Trailing Stop raised to {potential_new_stop:.2f} (Current Price: {current_price:.2f})")
-                
-            # Sell Logic: If price drops below stop loss
-            if current_price <= data["stop_loss"]:
-                # Limit-Down Check (跌停板无法卖出)
-                if '最低' in latest and latest['收盘'] == latest['最低'] and latest['最低'] < latest['开盘']:
-                    print(f"  -> 🚨 SELL TRIGGERED for {sym}, but stock is LIMIT-DOWN (close == low). Trapped! Cannot sell.")
-                else:
-                    print(f"  -> 🚨 SELL TRIGGERED: {sym} hit stop loss! Executing liquidation.")
-                    sell_value = current_price * data["shares"]
-                    cash += sell_value
-                    symbols_to_remove.append(sym)
-                    print(f"     Sold {data['shares']} shares at {current_price:.2f}. Returned {sell_value:.2f} to cash.")
+            
+            if direction == "LONG":
+                # Trailing Stop Logic (LONG)
+                potential_new_stop = current_price - (atr * 2.0)
+                if potential_new_stop > data["stop_loss"]:
+                    data["stop_loss"] = potential_new_stop
+                    print(f"  -> 🛡️ [LONG] {sym} Trailing Stop raised to {potential_new_stop:.2f}")
+                    
+                # Sell Logic (LONG)
+                if current_price <= data["stop_loss"]:
+                    if '最低' in latest and latest['收盘'] == latest['最低'] and latest['最低'] < latest['开盘']:
+                        print(f"  -> 🚨 SELL TRIGGERED for {sym}, but stock is LIMIT-DOWN. Trapped! Cannot sell.")
+                    else:
+                        print(f"  -> 🚨 SELL TRIGGERED: [LONG] {sym} hit stop loss! Executing liquidation.")
+                        sell_value = current_price * data["shares"]
+                        cash += sell_value
+                        symbols_to_remove.append(sym)
+                        print(f"     Sold {data['shares']} shares at {current_price:.2f}. Returned {sell_value:.2f} to cash.")
+            else:
+                # Trailing Stop Logic (SHORT)
+                potential_new_stop = current_price + (atr * 2.0)
+                if potential_new_stop < data["stop_loss"]:
+                    data["stop_loss"] = potential_new_stop
+                    print(f"  -> 🛡️ [SHORT] {sym} Trailing Stop lowered to {potential_new_stop:.2f}")
+                    
+                # Cover Logic (SHORT)
+                if current_price >= data["stop_loss"]:
+                    if '最高' in latest and latest['收盘'] == latest['最高'] and latest['最高'] > latest['开盘']:
+                        print(f"  -> 🚨 COVER TRIGGERED for {sym}, but stock is LIMIT-UP. Trapped! Cannot cover short.")
+                    else:
+                        print(f"  -> 🚨 COVER TRIGGERED: [SHORT] {sym} hit stop loss! Executing short cover.")
+                        # Profit = (Entry Price - Current Price) * Shares
+                        profit = (data["entry_price"] - current_price) * data["shares"]
+                        # Return original reserved collateral + profit
+                        capital_returned = (data["entry_price"] * data["shares"]) + profit
+                        cash += capital_returned
+                        symbols_to_remove.append(sym)
+                        print(f"     Covered {data['shares']} shares at {current_price:.2f}. Profit/Loss: {profit:.2f}. Returned {capital_returned:.2f} to cash.")
                 
         for sym in symbols_to_remove:
             del positions[sym]
@@ -78,21 +99,20 @@ class ExecutionEngine:
         cash = state["cash"]
         positions = state["positions"]
         
-        # Extract existing themes for Correlation Mutex Lock
         existing_themes = [p['theme'] for p in positions.values()]
         
         # 2. Open new positions
         for target in targets:
             sym = target['symbol']
             theme = target['theme']
+            direction = target.get('direction', 'LONG')
             
             if sym in positions:
                 print(f"  -> ⏭️ Already holding {sym}. Skipping.")
                 continue
                 
-            # Theme Correlation Lock
-            if theme in existing_themes:
-                print(f"  -> 🛑 THEME CORRELATION LOCK: Already holding a stock with theme '{theme}'. Skipping {sym} to prevent crash correlation.")
+            if direction == "LONG" and theme in existing_themes:
+                print(f"  -> 🛑 THEME CORRELATION LOCK: Already holding a stock with theme '{theme}'. Skipping {sym}.")
                 continue
                 
             df = self.price_fetcher.fetch_stock_data_with_retry(sym, retries=2)
@@ -104,26 +124,27 @@ class ExecutionEngine:
             atr = self.calculate_atr(sym)
             stop_distance = atr * 2.0
             
+            # Position sizing
             capital_at_risk = (cash + sum([p["shares"]*p["entry_price"] for p in positions.values()])) * self.risk_per_trade
             shares_to_buy = int(capital_at_risk / stop_distance)
-            
-            # Ensure we buy in lots of 100
             shares_to_buy = max(100, (shares_to_buy // 100) * 100)
             total_cost = shares_to_buy * current_price
             
             if cash >= total_cost:
-                cash -= total_cost
+                cash -= total_cost # Lock cash for both LONG (buy) and SHORT (collateral, ensuring 1x leverage max)
+                stop_loss = current_price - stop_distance if direction == "LONG" else current_price + stop_distance
                 positions[sym] = {
+                    "direction": direction,
                     "shares": shares_to_buy,
                     "entry_price": current_price,
-                    "stop_loss": current_price - stop_distance,
+                    "stop_loss": stop_loss,
                     "theme": theme,
                     "date_entered": datetime.datetime.now().strftime("%Y-%m-%d")
                 }
-                print(f"  -> 🎯 BUY ORDER EXECUTED: {sym} (Logic: {theme})")
-                print(f"     Shares: {shares_to_buy} | Price: {current_price:.2f} | Stop Loss Set at: {current_price - stop_distance:.2f}")
+                print(f"  -> 🎯 {direction} ORDER EXECUTED: {sym} (Logic: {theme})")
+                print(f"     Shares: {shares_to_buy} | Price: {current_price:.2f} | Stop Loss Set at: {stop_loss:.2f}")
             else:
-                print(f"  -> 🛑 INSUFFICIENT FUNDS to buy {sym}. Cash: {cash:.2f}, Needed: {total_cost:.2f}")
+                print(f"  -> 🛑 INSUFFICIENT FUNDS to open {direction} on {sym}. Cash: {cash:.2f}, Needed: {total_cost:.2f}")
                 
         if not targets and not positions:
             print("[Execution Engine] ⚠️ No active targets. Holding 100% Cash.")
