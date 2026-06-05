@@ -147,17 +147,29 @@ def run_v2_hedged_backtest(version="2.0"):
     
     results = []
     
-    # 记录该股当月是否已经触发过，避免连续触发
-    triggered_this_month = set()
+    # 投资组合管理状态
+    currently_holding = {}  # symbol -> 预计卖出日期 (pd.Timestamp)
+    cooldown_until = {}     # symbol -> 冷却期结束日期 (pd.Timestamp)
     
     for date_str in test_dates:
         target_date_pd = pd.to_datetime(date_str)
         
         for symbol, data in db.items():
-            # 获取当前年月
-            current_month_key = f"{symbol}_{target_date_pd.year}_{target_date_pd.month}"
-            if current_month_key in triggered_this_month:
-                continue
+            # ================= 仓位与冷却期管理 =================
+            # 1. 如果当前正在持仓，绝不重复买入（杜绝无限加仓）
+            if symbol in currently_holding:
+                if target_date_pd <= currently_holding[symbol]:
+                    continue
+                else:
+                    del currently_holding[symbol] # 持仓期已过，释放仓位
+                    
+            # 2. 如果刚刚触发过止损，进入 60 天“剁手冷却期”，绝不接飞刀
+            if symbol in cooldown_until:
+                if target_date_pd <= cooldown_until[symbol]:
+                    continue
+                else:
+                    del cooldown_until[symbol]
+            # ====================================================
                 
             hist = data['hist']
             fin = data['fin']
@@ -202,9 +214,6 @@ def run_v2_hedged_backtest(version="2.0"):
             sell_reason = "强制平仓(60日)"
             holding_days = 0
             
-            # 记录本月已触发
-            triggered_this_month.add(current_month_key)
-            
             prev_close = future_hist.iloc[0]['收盘']
             
             for _, row in future_hist.iterrows():
@@ -233,6 +242,12 @@ def run_v2_hedged_backtest(version="2.0"):
                     
             long_return = (sell_price - buy_price) / buy_price
             
+            # 登记持仓结束时间
+            currently_holding[symbol] = sell_date
+            
+            # 如果是止损离场，追加 60个交易日 的冷却期惩罚，防止反复接飞刀
+            if sell_reason == "止损(-15%)":
+                cooldown_until[symbol] = sell_date + pd.Timedelta(days=90) # 近似60个交易日
             
             # 计算期间大盘涨跌
             idx_future = index_hist[(index_hist['日期'] >= target_date_pd) & (index_hist['日期'] <= sell_date)]
