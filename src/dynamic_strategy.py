@@ -2,8 +2,8 @@ import numpy as np
 import pandas as pd
 
 def generate_signals(df):
-    ma_f = df['收盘'].rolling(10).mean()
-    ma_s = df['收盘'].rolling(89).mean()
+    ma_f = df['收盘'].rolling(71).mean()
+    ma_s = df['收盘'].rolling(75).mean()
     buy_signal = (ma_f > ma_s) & (ma_f.shift(1) <= ma_s.shift(1))
     
     tr1 = df['最高'] - df['最低']
@@ -12,5 +12,5 @@ def generate_signals(df):
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     atr = tr.rolling(14).mean()
     
-    stop_distance = atr * 3.00
+    stop_distance = atr * 0.50
     return buy_signal, stop_distance
