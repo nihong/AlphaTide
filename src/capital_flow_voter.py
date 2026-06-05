@@ -7,21 +7,55 @@ class CapitalFlowVoter:
     def __init__(self):
         pass
         
+    def get_market_prefix(self, symbol):
+        if symbol.startswith("60") or symbol.startswith("51") or symbol.startswith("68"):
+            return "sh" + symbol
+        else:
+            return "sz" + symbol
+
     def fetch_stock_data_with_retry(self, symbol, retries=3):
         start_date = (datetime.now() - timedelta(days=60)).strftime("%Y%m%d")
         end_date = datetime.now().strftime("%Y%m%d")
         
         for attempt in range(retries):
+            # Attempt 1: EastMoney (Primary)
             try:
                 if symbol.startswith("51") or symbol.startswith("15"):
                     df = ak.fund_etf_hist_em(symbol=symbol, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
                 else:
                     df = ak.stock_zh_a_hist(symbol=symbol, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
-                if not df.empty:
+                if not df.empty and '收盘' in df.columns:
                     return df
             except Exception as e:
-                print(f"    [Flow Voter] Fetch attempt {attempt+1} failed for {symbol}: {e}")
-                time.sleep(2)
+                print(f"    [Flow Voter] EastMoney fetch failed for {symbol}: {e}. Trying Sina fallback...")
+                
+            # Attempt 2: Sina (Fallback 1)
+            try:
+                sina_symbol = self.get_market_prefix(symbol)
+                df_sina = ak.stock_zh_a_daily(symbol=sina_symbol, start_date=start_date, end_date=end_date, adjust="qfq")
+                if not df_sina.empty:
+                    # Rename columns to match EastMoney format so downstream logic works
+                    df_sina = df_sina.rename(columns={"close": "收盘", "volume": "成交量"})
+                    if '收盘' in df_sina.columns:
+                        return df_sina
+            except Exception as e:
+                print(f"    [Flow Voter] Sina fetch failed for {symbol}: {e}. Trying Tencent fallback...")
+                
+            # Attempt 3: Tencent (Fallback 2)
+            try:
+                tx_symbol = self.get_market_prefix(symbol)
+                # Tencent endpoint uses format like sh600519
+                df_tx = ak.stock_zh_a_hist_tx(symbol=tx_symbol, start_date=start_date, end_date=end_date, adjust="qfq")
+                if not df_tx.empty:
+                    # Tencent usually has 'close' and 'amount' or 'volume'
+                    df_tx = df_tx.rename(columns={"close": "收盘", "amount": "成交量", "volume": "成交量"})
+                    if '收盘' in df_tx.columns:
+                        return df_tx
+            except Exception as e:
+                print(f"    [Flow Voter] Tencent fetch failed for {symbol}: {e}")
+                
+            time.sleep(2)
+            
         return pd.DataFrame()
 
     def check_sector_resonance(self):
