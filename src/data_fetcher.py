@@ -1,7 +1,9 @@
+import os
+os.environ['NO_PROXY'] = '*'
+
 import akshare as ak
 import pandas as pd
 
-import os
 import time
 import random
 import pickle
@@ -29,8 +31,8 @@ def fetch_with_cache(cache_key, fetch_func, expiry_hours=24, **kwargs):
             if datetime.now() - timestamp < timedelta(hours=expiry_hours):
                 return data
 
-    # 随机延迟，模拟真实人类行为
-    time.sleep(random.uniform(1.5, 3.5))
+    # 极速模式：新浪和腾讯极少封锁，将停顿缩减到极小的象征性防刷即可
+    time.sleep(0.1)
     
     # 强制设置代理环境变量（国内数据建议直连）
     os.environ["NO_PROXY"] = "*"
@@ -69,39 +71,63 @@ def fetch_market_tide():
 
 def fetch_a_stock_hist(symbol: str, period: str = "daily", start_date: str = "19700101", end_date: str = "20500101", adjust: str = "qfq"):
     """
-    获取A股历史K线数据，带双源容错：
-    1. 优先使用东方财富 (Eastmoney) 接口 ak.stock_zh_a_hist
-    2. 如果失败，自动降级到新浪 (Sina) 接口 ak.stock_zh_a_daily 并映射字段
+    获取A股历史K线数据，带有三源随机负载均衡 (Load Balancing)：
+    随机打乱 [东方财富, 新浪, 腾讯] 的请求顺序。
+    这样每个数据源只承担 33% 的并发压力，极大降低被单一平台封禁的概率。
     """
-    try:
-        df = ak.stock_zh_a_hist(symbol=symbol, period=period, start_date=start_date, end_date=end_date, adjust=adjust)
-        if df is not None and not df.empty:
-            return df
-    except Exception as e:
-        print(f"⚠️ 东方财富历史接口获取失败 ({symbol}): {e}，尝试使用新浪接口降级...")
+    # 针对 ETF 基金 (如 510300) 的特殊处理
+    if symbol.startswith('51') or symbol.startswith('15'):
+        try:
+            prefix = "sh" if symbol.startswith("51") else "sz"
+            sina_symbol = f"{prefix}{symbol}"
+            df_sina = ak.fund_etf_hist_sina(symbol=sina_symbol)
+            if df_sina is not None and not df_sina.empty:
+                # 过滤日期
+                df_sina['date'] = pd.to_datetime(df_sina['date']).dt.strftime('%Y%m%d')
+                df_sina = df_sina[(df_sina['date'] >= start_date) & (df_sina['date'] <= end_date)]
+                df_sina['date'] = pd.to_datetime(df_sina['date']).dt.strftime('%Y-%m-%d')
+                rename_map = {'date': '日期', 'open': '开盘', 'close': '收盘', 'high': '最高', 'low': '最低', 'volume': '成交量', 'amount': '成交额'}
+                return df_sina.rename(columns=rename_map)
+        except Exception as e:
+            print(f"⚠️ ETF 历史数据获取失败 ({symbol}): {e}")
+            return pd.DataFrame()
 
-    try:
-        # 新浪接口降级
-        prefix = "sh" if symbol.startswith("6") else "sz"
-        sina_symbol = f"{prefix}{symbol}"
-        df_sina = ak.stock_zh_a_daily(symbol=sina_symbol, start_date=start_date, end_date=end_date, adjust=adjust)
-        if df_sina is not None and not df_sina.empty:
-            rename_map = {
-                'date': '日期',
-                'open': '开盘',
-                'close': '收盘',
-                'high': '最高',
-                'low': '最低',
-                'volume': '成交量',
-                'amount': '成交额'
-            }
-            df_mapped = df_sina.rename(columns=rename_map)
-            if '日期' in df_mapped.columns:
-                df_mapped['日期'] = df_mapped['日期'].astype(str)
-            return df_mapped
-    except Exception as e:
-        print(f"❌ 新浪历史接口降级获取也失败 ({symbol}): {e}")
+    sources = ['eastmoney', 'sina', 'tencent']
+    random.shuffle(sources)
+    
+    for source in sources:
+        try:
+            if source == 'eastmoney':
+                df = ak.stock_zh_a_hist(symbol=symbol, period=period, start_date=start_date, end_date=end_date, adjust=adjust)
+                if df is not None and not df.empty:
+                    return df
+            
+            elif source == 'sina':
+                prefix = "sh" if symbol.startswith("6") else "sz"
+                sina_symbol = f"{prefix}{symbol}"
+                df_sina = ak.stock_zh_a_daily(symbol=sina_symbol, start_date=start_date, end_date=end_date, adjust=adjust)
+                if df_sina is not None and not df_sina.empty:
+                    rename_map = {'date': '日期', 'open': '开盘', 'close': '收盘', 'high': '最高', 'low': '最低', 'volume': '成交量', 'amount': '成交额'}
+                    df_mapped = df_sina.rename(columns=rename_map)
+                    if '日期' in df_mapped.columns: df_mapped['日期'] = df_mapped['日期'].astype(str)
+                    return df_mapped
+            
+            elif source == 'tencent':
+                prefix = "sh" if symbol.startswith("6") else "sz"
+                tx_symbol = f"{prefix}{symbol}"
+                df_tx = ak.stock_zh_a_hist_tx(symbol=tx_symbol, start_date=start_date, end_date=end_date, adjust=adjust)
+                if df_tx is not None and not df_tx.empty:
+                    rename_map = {'date': '日期', 'open': '开盘', 'close': '收盘', 'high': '最高', 'low': '最低', 'amount': '成交额'}
+                    df_mapped = df_tx.rename(columns=rename_map)
+                    if '成交量' not in df_mapped.columns: df_mapped['成交量'] = df_mapped['成交额'] / df_mapped['收盘'] * 100
+                    if '日期' in df_mapped.columns: df_mapped['日期'] = df_mapped['日期'].astype(str)
+                    return df_mapped
+                    
+        except Exception as e:
+            print(f"⚠️ {source} 接口获取失败 ({symbol}): {e}，尝试下一个数据源...")
+            time.sleep(1) # 失败后稍微休息一下再请求下一个
 
+    print(f"❌ 所有历史接口(东财/新浪/腾讯)均获取彻底失败 ({symbol})")
     return pd.DataFrame()
 
 

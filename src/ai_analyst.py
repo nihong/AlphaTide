@@ -35,6 +35,51 @@ class AIAnalyst:
         except Exception as e:
             return f"❌ AI 分析发生错误: {e}"
 
+    def extract_hot_industries_from_reports(self, consensus_stocks_df):
+        """
+        利用大模型对研报储备池中的个股进行归纳，提取出最核心的 Top 3 行业。
+        """
+        if consensus_stocks_df.empty:
+            return []
+            
+        # 将储备池个股拼接成文本
+        stocks_text = ""
+        for _, row in consensus_stocks_df.iterrows():
+            stocks_text += f"{row['名称']}({row['代码']}) - 研报数:{row['研报数']}, 预期增速:{row['预期增速']:.2%}\n"
+            
+        prompt = f"""
+你是一位顶级的宏观策略分析师。以下是近期获得华尔街及国内头部券商机构“最高频覆盖”且“盈利预期增速最快”的 A 股上市公司名单：
+
+{stocks_text}
+
+请根据你的知识库，判断这些公司分别属于哪些产业链或行业（如：光通信、半导体、航运、生猪养殖等）。
+请从中提取出共振最强烈的 Top 3 行业名称。
+注意：
+1. 只输出最核心的 3 个行业名称。
+2. 必须以严格的 JSON 格式输出，格式如下：
+{{"recommended_sectors": ["行业1", "行业2", "行业3"]}}
+不要输出任何其他解释性文字！
+"""
+        response = self.analyze_with_llm(prompt)
+        
+        # 尝试解析 JSON
+        import json
+        import re
+        try:
+            # 使用正则提取 JSON 块以防模型包含多余文字
+            match = re.search(r'\{.*\}', response, re.DOTALL)
+            if match:
+                json_str = match.group(0)
+                data = json.loads(json_str)
+                if 'recommended_sectors' in data:
+                    return data['recommended_sectors']
+            else:
+                data = json.loads(response)
+                return data.get('recommended_sectors', [])
+        except Exception as e:
+            print(f"⚠️ 解析 AI 行业输出失败: {response} | Error: {e}")
+            return []
+
     def generate_report_prompt(self, symbol, market, financial_data, screening_result):
         """
         创建一个让大模型进行深度分析的 Prompt。

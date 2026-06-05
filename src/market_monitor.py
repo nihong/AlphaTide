@@ -191,10 +191,25 @@ class MarketMonitor:
         light, light_msg, regime = self.check_market_light(target_date)
         print(f"🚦 大盘红绿灯: {light} - {light_msg}")
         
-        is_bear_market = (light == "RED" or regime == "EXTREME_BEAR")
+        is_bear_market = (light == "RED" or regime in ["EXTREME_BEAR", "SLOW_DECLINE"])
         print(f"🌦️ 当前细分市场气候: {regime}")
         if is_bear_market:
-            print("🌧️ 识别为熊市环境，已开启大盘防守开关，全系统切换至 [左侧防守引擎 (超跌反弹)] 模式")
+            print("🌧️ 识别为单边下跌或阴跌环境，已触发【强制空仓协议】，并在报表中输出做空指令！")
+            sell_warnings = []
+            
+            # 将 ETF 对冲作为“推荐标的”输出，以便回测系统能够捕捉和统计
+            hedge_recommendations = [{
+                "name": "做空沪深300ETF" if market == "A" else "FI南方恒指",
+                "symbol": "510300" if market == "A" else "07300",
+                "sector": "防御对冲 [熊市强制空头]",
+                "reason": "大盘触发红色警报或阴跌环境，强制启动无杠杆做空保护本金",
+                "position": "30.0%",
+                "ai_insight": "宏观防守：系统已切断多头股票买入权限。建议动用 30% 闲置资金进行做空对冲。",
+                "resonance_count": 999
+            }]
+            
+            self._generate_final_report(hedge_recommendations, light, light_msg, sell_warnings, target_date, market=market, macro_data=macro_status)
+            return
 
         # 1. 舆情热点探测 (降维打击：感知市场体温)
         market_temperature = []

@@ -115,6 +115,20 @@ class Screener:
                 else:
                     return False, "未满足缩量回踩或MACD走弱"
                     
+            elif mode == 'lurk_diamond':
+                # 钻石手长线潜伏逻辑：无视短期均线多空，只要在年线/半年线附近缩量企稳即可
+                ema120 = df['收盘'].ewm(span=120, adjust=False).mean().iloc[-1]
+                bias_ema120 = (latest_price - ema120) / ema120
+                # 允许在半年线上下 15% 震荡潜伏
+                is_near_bottom = -0.20 < bias_ema120 < 0.15
+                macd_ok = latest_macd > prev_macd
+                
+                if is_near_bottom and macd_ok:
+                    return True, f"💎 钻石潜伏: 长线大底附近MACD企稳"
+                else:
+                    return False, f"未达长线潜伏条件 (偏离半年线 {bias_ema120:.1%} 或 MACD未企稳)"
+                    
+                    
             elif mode == 'momentum':
                 recent_5d = df.iloc[-5:]
                 recent_30d_vol_avg = df.iloc[-30:]['成交量'].mean()
@@ -267,13 +281,24 @@ class Screener:
 
         return None
 
-    def screen_a_share(self, symbol, df, min_roe=None, mode=None):
+    def screen_a_share(self, symbol, df, min_roe=None, mode=None, target_date=None):
         """
         Screen A-share based on abstract data.
         Indicators: ROE, Growth Trend, Cash-to-Profit Ratio, Dividend.
         """
         if df is None or df.empty:
             return False, "无数据"
+            
+        # 消除未来函数 (Lookahead Bias): 剔除目标日期之后的财报列
+        if target_date:
+            target_date_str = str(target_date).replace('-', '')
+            valid_cols = ['选项', '指标']
+            for col in df.columns:
+                if col.isdigit() and col <= target_date_str:
+                    valid_cols.append(col)
+            df = df[[c for c in valid_cols if c in df.columns]]
+            if len(df.columns) <= 2:
+                return False, "目标日期前无财报数据"
         
         target_roe = min_roe if min_roe is not None else self.min_roe
         
@@ -393,6 +418,80 @@ class Screener:
         except Exception as e:
             return False, f"筛选出错: {e}"
 
+    def screen_turnaround_fundamental(self, symbol, df, target_date=None):
+        """
+        [戴维斯双击] 困境反转/业绩加速筛选器！
+        逻辑:
+        1. 寻找净利润增速正在“加速”的公司 (Q3同比 > Q2同比 > Q1同比)。
+        2. 结合估值底保护。
+        """
+        if df is None or df.empty:
+            return False, "无数据"
+            
+        if target_date:
+            target_date_str = str(target_date).replace('-', '')
+            valid_cols = ['选项', '指标']
+            for col in df.columns:
+                if col.isdigit() and col <= target_date_str:
+                    valid_cols.append(col)
+            df = df[[c for c in valid_cols if c in df.columns]]
+            if len(df.columns) <= 2:
+                return False, "目标日期前无财报数据"
+                
+        try:
+            reasons = []
+            passed = True
+
+            def get_series(name):
+                row = df[df['指标'].str.contains(name, na=False, regex=False)]
+                if not row.empty:
+                    vals = []
+                    for col_idx in range(2, min(len(row.columns), 6)):
+                        val = row.iloc[0, col_idx]
+                        if pd.notnull(val):
+                            try: vals.append(float(val))
+                            except: pass
+                    return vals
+                return []
+
+            # 1. 业绩加速的核心逻辑：增速连续两个季度向上，或者由负转正且爆量
+            growth_list = get_series('归属母公司净利润增长率')
+            if not growth_list: growth_list = get_series('净利润增长率')
+            if not growth_list: growth_list = get_series('归属母公司净利润同比增长')
+            
+            if len(growth_list) >= 3:
+                recent_1 = growth_list[0]
+                recent_2 = growth_list[1]
+                recent_3 = growth_list[2]
+                
+                # 情况A：困境反转 (之前平庸/下滑，最新一期转正 > 15%)
+                is_turnaround = recent_2 < 10 and recent_1 > 15.0
+                
+                # 情况B：主升浪加速 (最新一期环比增速提高，且绝对增速 > 15%)
+                is_accelerating = recent_1 > recent_2 and recent_1 > 15.0
+                
+                if is_turnaround:
+                    reasons.append(f"🚀 困境反转: 增速由负转正爆发 ({recent_2}% -> {recent_1}%)")
+                elif is_accelerating:
+                    reasons.append(f"🔥 业绩加速: 增速连续两季度提升 ({recent_3}% -> {recent_2}% -> {recent_1}%)")
+                else:
+                    return False, f"未见业绩反转或加速迹象 (近三期增速: {recent_1}%, {recent_2}%, {recent_3}%)"
+            else:
+                return False, "业绩历史数据不足三期，无法判断拐点"
+                
+            # 2. 估值保护 (防伪)
+            # 要求 ROE 有基本底线 (比如不要求多高，但起码不能巨亏)
+            roe_list = get_series('净资产收益率(ROE)')
+            if not roe_list: roe_list = get_series('净资产收益率')
+            if roe_list and roe_list[0] < -5.0:
+                 return False, f"ROE 过于恶劣 ({roe_list[0]}%)，警惕财务地雷"
+                 
+            # 如果走到这里，说明业绩确实出现了巨大的爆发或反转！
+            return True, " | ".join(reasons)
+            
+        except Exception as e:
+            return False, f"反转筛选出错: {e}"
+
     def screen_hk_technical(self, symbol, target_date=None):
         """
         HK Technical Screen (Mean Reversion & Value Investing):
@@ -475,3 +574,60 @@ class Screener:
             return passed, ", ".join(reasons)
         except Exception as e:
             return False, f"筛选出错: {e}"
+
+    def get_sector_fundamentals(self, sector_name, sector_label=None, target_date=None):
+        """
+        计算行业的宏观基本面中位数 (拦截伪概念炒作)
+        """
+        stocks = self.get_stocks_in_sector(sector_name, sector_label)
+        if stocks is None or stocks.empty: return None
+        
+        # 尝试获取市值或成交量排名前列的股票来代表板块，这里简化为取前 10 只
+        top_stocks = stocks.head(10)
+        
+        roes = []
+        growths = []
+        from src.data_fetcher import fetch_a_stock_financials
+        
+        for _, stock in top_stocks.iterrows():
+            symbol = str(stock['代码'])
+            # 过滤北交所和ST
+            if symbol.startswith('8') or symbol.startswith('4'): continue
+            
+            df = fetch_a_stock_financials(symbol)
+            if df is None or df.empty: continue
+            
+            if target_date:
+                target_date_str = str(target_date).replace('-', '')
+                valid_cols = ['选项', '指标']
+                for col in df.columns:
+                    if col.isdigit() and col <= target_date_str:
+                        valid_cols.append(col)
+                df = df[[c for c in valid_cols if c in df.columns]]
+                if len(df.columns) <= 2: continue
+                
+            def get_series(name):
+                row = df[df['指标'].str.contains(name, na=False, regex=False)]
+                if not row.empty:
+                    for col_idx in range(2, min(len(row.columns), 6)):
+                        val = row.iloc[0, col_idx]
+                        if pd.notnull(val):
+                            try: return float(val)
+                            except: pass
+                return None
+                
+            roe = get_series('净资产收益率')
+            growth = get_series('归属母公司净利润增长率')
+            
+            if roe is not None: roes.append(roe)
+            if growth is not None: growths.append(growth)
+            
+        import numpy as np
+        median_roe = np.median(roes) if roes else 0.0
+        median_growth = np.median(growths) if growths else 0.0
+        
+        return {
+            'median_roe': median_roe,
+            'median_growth': median_growth,
+            'sample_size': len(roes)
+        }

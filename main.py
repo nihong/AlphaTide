@@ -16,7 +16,14 @@ def main():
     parser.add_argument("--auto", action="store_true", help="Run the full automated daily monitoring pipeline")
     parser.add_argument("--date", type=str, help="Target date for historical backtesting (e.g., '2024-03-01')")
     parser.add_argument("--fast", action="store_true", help="Fast mode: Skip LLM analysis for faster backtesting")
+    parser.add_argument("--diamond", action="store_true", help="Run the long-term Diamond Hands lurker pipeline")
     args = parser.parse_args()
+
+    if args.diamond:
+        from src.long_term_monitor import LongTermMonitor
+        monitor = LongTermMonitor()
+        monitor.run_diamond_scan()
+        return
 
     if args.auto:
         from src.market_monitor import MarketMonitor
