@@ -63,16 +63,16 @@ class RiskManager:
                     descriptions.append(f"🔴 【震荡市止盈】：股价({close})已触及布林带上轨({round(upper_band,2)})，建议主动止盈。")
                 
                 # 震荡市防守略紧
-                stop_atr = 1.76
+                stop_atr = 1.63
             elif regime == "SLOW_RISE":
                 # 慢涨市：只要不有效跌破EMA20，忽略盘中小幅刺穿，放宽ATR
-                stop_atr = 1.76
+                stop_atr = 1.63
                 if close < ema20:
                     triggered_signals.append("SlowRiseExit")
                     descriptions.append(f"🔴 【慢涨破坏】：股价({close})已跌破 20日均线核心支撑({round(ema20,2)})，慢牛格局结束。")
             else:
                 # 正常/极端市：严格的 2.5ATR 和 EMA10 止盈
-                stop_atr = 1.76
+                stop_atr = 1.63
                 if close < ema10:
                     triggered_signals.append("Aggressive")
                     descriptions.append(f"🔴 【止盈/趋势破坏】：股价({close}) 已跌破 10日指数均线({round(ema10, 2)})，短期动能衰退。")
