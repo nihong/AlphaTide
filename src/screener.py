@@ -10,8 +10,8 @@ from src.data_fetcher import (
 class Screener:
     def __init__(self):
         # 基础筛选条件 (放宽ROE要求，交由AI深度判断困境反转)
-        self.min_roe = 5.0
-        self.min_growth = 20.0
+        self.min_roe = 15.0
+        self.min_growth = 15.0
         self.max_debt_ratio = 50.0
         self.min_cash_profit_ratio = 0.5
         
@@ -77,11 +77,11 @@ class Screener:
             latest_price = df.iloc[-1]['收盘']
             latest_vol = df.iloc[-1]['成交量']
             
-            df['ema10'] = df['收盘'].ewm(span=10, adjust=False).mean()
+            df['ema5'] = df['收盘'].ewm(span=5, adjust=False).mean()
             df['ema20'] = df['收盘'].ewm(span=20, adjust=False).mean()
             df['ema60'] = df['收盘'].ewm(span=60, adjust=False).mean()
             
-            ema10 = df['ema10'].iloc[-1]
+            ema10 = df['ema5'].iloc[-1]
             ema20 = df['ema20'].iloc[-1]
             ema60 = df['ema60'].iloc[-1]
             vol_ma5 = df.iloc[-5:]['成交量'].mean()
