@@ -9,20 +9,20 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.screener import Screener
 from src.data_fetcher import fetch_a_stock_hist_cached, fetch_a_stock_financials, fetch_hk_stock_financials, fetch_market_index, fetch_hk_stock_hist_cached
 
-# 新增：加入顶级港股白马以及A股核心池
-CORE_ASSETS = {
-    '互联网': '00700',   # 腾讯控股 (港股)
-    '本地生活': '03690', # 美团 (港股)
-    '新能源车': '01211', # 比亚迪股份 (港股)
-    '白酒': '600519',    # 贵州茅台
-    '电池': '300750',    # 宁德时代
-    '医疗': '300244',    # 迈瑞医疗
-    '消费电子': '002475',# 立讯精密
-    '免税': '601888',    # 中国中免
-    '安防': '002415',    # 海康威视
-    '金融': '601318',    # 中国平安
-    '通信': '00762',     # 中国联通 (港股)
-    '半导体': '00981'    # 中芯国际 (港股)
+# 新增：加入顶级港股白马以及A股核心池 (带股票名称)
+CORE_ASSETS_INFO = {
+    '00700': {'name': '腾讯控股', 'sector': '互联网'},
+    '03690': {'name': '美团', 'sector': '本地生活'},
+    '01211': {'name': '比亚迪股份', 'sector': '新能源车'},
+    '600519': {'name': '贵州茅台', 'sector': '白酒'},
+    '300750': {'name': '宁德时代', 'sector': '电池'},
+    '300244': {'name': '迈瑞医疗', 'sector': '医疗'},
+    '002475': {'name': '立讯精密', 'sector': '消费电子'},
+    '601888': {'name': '中国中免', 'sector': '免税'},
+    '002415': {'name': '海康威视', 'sector': '安防'},
+    '601318': {'name': '中国平安', 'sector': '金融'},
+    '00762': {'name': '中国联通', 'sector': '通信'},
+    '00981': {'name': '中芯国际', 'sector': '半导体'}
 }
 
 def git_commit_and_push(version, profit, drawdown, msg_detail):
@@ -42,12 +42,11 @@ def update_readme(version, total_trades, win_rate, avg_profit, max_drawdown, df)
     if 'profit_pct_str' not in df_md.columns:
         df_md['profit_pct_str'] = df_md['profit_pct'].apply(lambda x: f"{x:.2%}")
         df_md['raw_long_str'] = df_md['raw_long'].apply(lambda x: f"{x:.2%}")
-        df_md['idx_return_str'] = df_md['idx_return'].apply(lambda x: f"{x:.2%}")
         
     rename_cols = {
         'buy_date': '买入日期',
         'sell_date': '卖出日期',
-        'symbol': '股票代码',
+        'symbol_name': '股票名称',
         'strategy': '执行策略',
         'sell_reason': '平仓原因',
         'raw_long_str': '个股单边收益',
@@ -56,7 +55,7 @@ def update_readme(version, total_trades, win_rate, avg_profit, max_drawdown, df)
     }
     df_md.rename(columns=rename_cols, inplace=True)
     
-    display_cols = ['买入日期', '卖出日期', '股票代码', '执行策略', '平仓原因', '个股单边收益', '同期大盘涨跌', '对冲后净收益']
+    display_cols = ['买入日期', '卖出日期', '股票名称', '执行策略', '平仓原因', '个股单边收益', '同期大盘涨跌', '对冲后净收益']
     trade_table = df_md[display_cols].to_markdown(index=False)
     
     report = f"""
@@ -101,17 +100,27 @@ def run_v2_hedged_backtest(version="2.0"):
     db = {}
     screener = Screener()
     
-    # 加载沪深300作为大盘对冲基准
-    index_hist = fetch_market_index("sh000300")
-    if index_hist is not None:
-        index_hist.rename(columns={'date': '日期', 'open': '开盘', 'close': '收盘'}, inplace=True)
-        index_hist['日期'] = pd.to_datetime(index_hist['日期'])
-    else:
-        print("大盘数据加载失败")
-        return
-        
-    for sector, symbol in CORE_ASSETS.items():
+    # 加载三个核心指数作为大盘对冲基准
+    from src.data_fetcher import fetch_hk_market_index
+    indices = {
+        '沪深300': fetch_market_index("sh000300"),
+        '创业板指': fetch_market_index("sz399006"),
+        '恒生指数': fetch_hk_market_index("HSI")
+    }
+    
+    for k, v in indices.items():
+        if v is not None and not v.empty:
+            if 'date' in v.columns:
+                v.rename(columns={'date': '日期', 'open': '开盘', 'close': '收盘'}, inplace=True)
+            v['日期'] = pd.to_datetime(v['日期'])
+        else:
+            print(f"大盘数据加载失败: {k}")
+            return
+            
+    for symbol, info in CORE_ASSETS_INFO.items():
         is_hk = symbol.startswith('0') and len(symbol) == 5
+        sector = info['sector']
+        name = info['name']
         
         # 港股数据拉取
         if is_hk:
@@ -123,7 +132,7 @@ def run_v2_hedged_backtest(version="2.0"):
             
         if hist is not None and not hist.empty and fin is not None and not fin.empty:
             hist['日期'] = pd.to_datetime(hist['日期'])
-            db[symbol] = {'sector': sector, 'hist': hist, 'fin': fin, 'is_hk': is_hk}
+            db[symbol] = {'sector': sector, 'name': name, 'hist': hist, 'fin': fin, 'is_hk': is_hk}
             
     # 2. 模拟按月回测 (过往7年5月份每个交易日)
     test_dates = []
@@ -144,30 +153,6 @@ def run_v2_hedged_backtest(version="2.0"):
     for date_str in test_dates:
         target_date_pd = pd.to_datetime(date_str)
         
-        # 判定大盘环境：牛市 or 熊市
-        idx_past = index_hist[index_hist['日期'] <= target_date_pd]
-        if len(idx_past) < 250: continue
-        idx_close = idx_past.iloc[-1]['收盘']
-        idx_ma250 = idx_past['收盘'].ewm(span=250, adjust=False).mean().iloc[-1]
-        
-        is_bear_market = idx_close < idx_ma250
-        
-        # 大盘基准的未来3个月涨跌幅（用于计算空头对冲收益）
-        idx_future = index_hist[index_hist['日期'] > target_date_pd]
-        if idx_future.empty: continue
-        idx_buy_price = idx_future.iloc[0]['开盘']
-        
-        idx_sell_price = idx_buy_price
-        for i, row in idx_future.iterrows():
-            if i >= idx_future.index[0] + 60:
-                idx_sell_price = row['收盘']
-                break
-        
-        # 做空收益 = (买入价 - 卖出价)/买入价
-        # 大盘绝对涨跌 = (卖出价 - 买入价)/买入价
-        hedge_return = (idx_buy_price - idx_sell_price) / idx_buy_price 
-        idx_return = (idx_sell_price - idx_buy_price) / idx_buy_price
-        
         for symbol, data in db.items():
             # 获取当前年月
             current_month_key = f"{symbol}_{target_date_pd.year}_{target_date_pd.month}"
@@ -176,6 +161,26 @@ def run_v2_hedged_backtest(version="2.0"):
                 
             hist = data['hist']
             fin = data['fin']
+            is_hk = data['is_hk']
+            name = data['name']
+            
+            # 动态选择对应该股票的大盘指数
+            if is_hk:
+                idx_name = "恒生"
+                index_hist = indices['恒生指数']
+            elif symbol.startswith('300'):
+                idx_name = "创业板"
+                index_hist = indices['创业板指']
+            else:
+                idx_name = "沪深"
+                index_hist = indices['沪深300']
+                
+            idx_past = index_hist[index_hist['日期'] <= target_date_pd]
+            if len(idx_past) < 250: continue
+            idx_close = idx_past.iloc[-1]['收盘']
+            idx_ma250 = idx_past['收盘'].ewm(span=250, adjust=False).mean().iloc[-1]
+            
+            is_bear_market = idx_close < idx_ma250
             
             hist_past = hist[hist['日期'] <= target_date_pd]
             if len(hist_past) < 120: continue
@@ -228,23 +233,39 @@ def run_v2_hedged_backtest(version="2.0"):
                     
             long_return = (sell_price - buy_price) / buy_price
             
+            
+            # 计算期间大盘涨跌
+            idx_future = index_hist[(index_hist['日期'] >= target_date_pd) & (index_hist['日期'] <= sell_date)]
+            if not idx_future.empty:
+                idx_buy_price = idx_future.iloc[0]['开盘']
+                idx_sell_price = idx_future.iloc[-1]['收盘']
+                hedge_return = (idx_buy_price - idx_sell_price) / idx_buy_price # 做空收益
+                idx_return = (idx_sell_price - idx_buy_price) / idx_buy_price
+            else:
+                hedge_return = 0
+                idx_return = 0
+                
             # 如果是熊市，加入对冲收益 (50%多头 + 50%空头)
             if is_bear_market:
                 total_return = (long_return * 0.5) + (hedge_return * 0.5)
-                strat = "Alpha对冲 (做多核心+做空300)"
+                strat = f"Alpha对冲 (做空{idx_name})"
             else:
                 total_return = long_return
-                strat = "单边多头 (牛市满仓)"
+                strat = "单边多头 (满仓)"
+                
+            idx_return_str = f"{idx_return:.2%}({idx_name})"
                 
             results.append({
                 'buy_date': date_str,
-                'sell_date': sell_date,
+                'sell_date': str(sell_date)[:10],
                 'sell_reason': sell_reason,
                 'symbol': symbol,
+                'symbol_name': f"{name}({symbol})",
                 'strategy': strat,
                 'profit_pct': total_return,
                 'raw_long': long_return,
-                'idx_return': idx_return
+                'idx_return': idx_return,
+                'idx_return_str': idx_return_str
             })
             
     df = pd.DataFrame(results)
@@ -269,16 +290,15 @@ def run_v2_hedged_backtest(version="2.0"):
         # 导出具体买卖明细
         df['profit_pct_str'] = df['profit_pct'].apply(lambda x: f"{x:.2%}")
         df['raw_long_str'] = df['raw_long'].apply(lambda x: f"{x:.2%}")
-        df['idx_return_str'] = df['idx_return'].apply(lambda x: f"{x:.2%}")
         df.to_csv("reports/v2_trades_detail.csv", index=False)
         print("\n📈 最近三年买卖明细 (2024-2026):")
         recent_df = df[df['buy_date'] >= '2024-01-01']
-        print(recent_df[['buy_date', 'sell_date', 'symbol', 'strategy', 'sell_reason', 'raw_long_str', 'idx_return_str', 'profit_pct_str']].to_markdown())
+        print(recent_df[['buy_date', 'sell_date', 'symbol_name', 'strategy', 'sell_reason', 'raw_long_str', 'idx_return_str', 'profit_pct_str']].to_markdown())
         
         print("\n🏆 HK 港股触发明细:")
         hk_df = df[df['symbol'].str.startswith('0') & (df['symbol'].str.len() == 5)]
         if not hk_df.empty:
-            print(hk_df[['buy_date', 'sell_date', 'symbol', 'strategy', 'sell_reason', 'raw_long_str', 'idx_return_str', 'profit_pct_str']].to_markdown())
+            print(hk_df[['buy_date', 'sell_date', 'symbol_name', 'strategy', 'sell_reason', 'raw_long_str', 'idx_return_str', 'profit_pct_str']].to_markdown())
         else:
             print("未能成功触发港股交易，或港股接口被拒。")
         
