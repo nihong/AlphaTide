@@ -35,7 +35,7 @@ def git_commit_and_push(version, profit, drawdown, msg_detail):
         pass
 
 def update_readme(version, total_trades, win_rate, avg_profit, max_drawdown, df):
-    report_path = "reports/backtest_may_7y.md"
+    report_path = "reports/backtest_full_7y.md"
     
     # 格式化表格数据
     df_md = df.copy()
@@ -134,16 +134,8 @@ def run_v2_hedged_backtest(version="2.0"):
             hist['日期'] = pd.to_datetime(hist['日期'])
             db[symbol] = {'sector': sector, 'name': name, 'hist': hist, 'fin': fin, 'is_hk': is_hk}
             
-    # 2. 模拟按月回测 (过往7年5月份每个交易日)
-    test_dates = []
-    for y in range(2020, 2027):
-        for day in range(1, 32):
-            try:
-                dt = datetime(y, 5, day)
-                if dt.weekday() < 5:  # 排除周末
-                    test_dates.append(dt.strftime('%Y-%m-%d'))
-            except ValueError:
-                pass # 忽略31号之类的非法日期（如果某个月没有）
+    # 2. 模拟全量回测 (过往7年所有交易日: 2020-01-01 至今)
+    test_dates = [d.strftime('%Y-%m-%d') for d in pd.bdate_range(start='2020-01-01', end='2026-06-05')]
     
     results = []
     
@@ -305,20 +297,28 @@ def run_v2_hedged_backtest(version="2.0"):
         # 导出具体买卖明细
         df['profit_pct_str'] = df['profit_pct'].apply(lambda x: f"{x:.2%}")
         df['raw_long_str'] = df['raw_long'].apply(lambda x: f"{x:.2%}")
-        df.to_csv("reports/v2_trades_detail.csv", index=False)
+        df.to_csv("reports/v2_trades_full_detail.csv", index=False)
         print("\n📈 最近三年买卖明细 (2024-2026):")
         recent_df = df[df['buy_date'] >= '2024-01-01']
-        print(recent_df[['buy_date', 'sell_date', 'symbol_name', 'strategy', 'sell_reason', 'raw_long_str', 'idx_return_str', 'profit_pct_str']].to_markdown())
         
-        print("\n🏆 HK 港股触发明细:")
+        # 为了防止终端打印过长，只打印最近20条
+        print(recent_df[['buy_date', 'sell_date', 'symbol_name', 'strategy', 'sell_reason', 'raw_long_str', 'idx_return_str', 'profit_pct_str']].tail(20).to_markdown())
+        
+        print("\n🏆 HK 港股触发明细 (最近20条):")
         hk_df = df[df['symbol'].str.startswith('0') & (df['symbol'].str.len() == 5)]
         if not hk_df.empty:
-            print(hk_df[['buy_date', 'sell_date', 'symbol_name', 'strategy', 'sell_reason', 'raw_long_str', 'idx_return_str', 'profit_pct_str']].to_markdown())
+            print(hk_df[['buy_date', 'sell_date', 'symbol_name', 'strategy', 'sell_reason', 'raw_long_str', 'idx_return_str', 'profit_pct_str']].tail(20).to_markdown())
         else:
             print("未能成功触发港股交易，或港股接口被拒。")
         
+        # 清理旧的回测报告（强制纪律）
+        if os.path.exists("reports/backtest_may_7y.md"):
+            os.remove("reports/backtest_may_7y.md")
+        if os.path.exists("reports/v2_trades_detail.csv"):
+            os.remove("reports/v2_trades_detail.csv")
+        
         update_readme(version, total_trades, win_rate, avg_profit, max_drawdown, df)
-        git_commit_and_push(version, avg_profit, max_drawdown, "Update documentation with all trade logs and disciplines")
+        git_commit_and_push(version, avg_profit, max_drawdown, "Update documentation with Full 7-Years trade logs and strategy validation")
     else:
         print("未触发交易。")
 
