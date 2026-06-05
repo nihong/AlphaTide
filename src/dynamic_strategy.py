@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
 # Winner-Take-All Logic
-# Lookback=10, Hold=1, MA=10
+# Lookback=20, Hold=5, MA=120
 def generate_signals(df):
     pass
