@@ -1,4 +1,6 @@
-import time
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 from brain_nlp import NLPBrain
 from falsification_filter import FalsificationFilter
 from capital_flow_voter import CapitalFlowVoter

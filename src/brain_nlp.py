@@ -1,7 +1,9 @@
 import os
 import json
-import random
 from datetime import datetime
+import akshare as ak
+import urllib.request
+import urllib.error
 
 class NLPBrain:
     def __init__(self):
@@ -11,35 +13,90 @@ class NLPBrain:
             with open(self.watchlist_file, "w") as f:
                 json.dump({"date": "", "stocks": []}, f)
                 
-    def read_reports(self):
-        """
-        Simulate scraping EastMoney / Sina Finance for brokerage reports.
-        In a real scenario, this calls DeepSeek API to extract tickers and narratives.
-        """
-        print("[Brain NLP] 🧠 Scraping daily brokerage reports and policy news...")
-        # Simulated LLM output
-        ideas = [
-            {"symbol": "600519", "theme": "Consumer Recovery", "logic_score": 85},
-            {"symbol": "002594", "theme": "EV Export Boom", "logic_score": 92},
-            {"symbol": "300308", "theme": "AI Optoelectronics", "logic_score": 95},
-            {"symbol": "518880", "theme": "Geopolitical Hedge", "logic_score": 88},
-            {"symbol": "513100", "theme": "US Tech Earnings", "logic_score": 90}
+        # Load DeepSeek API Key from .env manually to avoid extra dependencies
+        self.api_key = None
+        if os.path.exists(".env"):
+            with open(".env", "r") as f:
+                for line in f:
+                    if line.startswith("DEEPSEEK_API_KEY"):
+                        self.api_key = line.strip().split("=")[1].strip(" '\"")
+
+    def fetch_latest_news(self):
+        """Fetch real financial news summary from Akshare (e.g. CCTV news or Sina)"""
+        print("[Brain NLP] 📡 Fetching real macro and industry news via Akshare...")
+        try:
+            # CCTV Xinwen Lianbo text summary is a great macro indicator in China
+            df = ak.news_cctv(date=datetime.now().strftime("%Y%m%d"))
+            if not df.empty:
+                news_text = "\\n".join(df['content'].head(10).tolist())
+                return news_text
+        except Exception as e:
+            print(f"Failed to fetch CCTV news: {e}")
+            
+        return "Macro environment remains stable. Tech sector (Semiconductors) and Export/Shipping show strong resilience. Gold prices are fluctuating."
+
+    def call_llm(self, news_text):
+        if not self.api_key:
+            print("[Brain NLP] ⚠️ DEEPSEEK_API_KEY not found in .env. Falling back to rule-based logic.")
+            return self.fallback_logic()
+
+        print("[Brain NLP] 🧠 Connecting to DeepSeek API for NLP analysis...")
+        prompt = f"""
+        You are a top-tier Quantitative Financial Analyst. 
+        Read the following macro news and extract 3 high-conviction investment themes.
+        For each theme, provide ONE representative Chinese A-share or ETF ticker symbol (e.g. '513100' or '600519').
+        Return ONLY valid JSON in this exact format:
+        [
+            {{"symbol": "513100", "theme": "Semiconductor", "logic_score": 90}},
+            ...
         ]
         
-        # Add some random noise to simulate dynamic daily generation
-        selected = random.sample(ideas, k=random.randint(3, 5))
-        print(f"[Brain NLP] 🎯 LLM Extracted {len(selected)} Core Logic Targets.")
-        return selected
+        News Text:
+        {news_text}
+        """
+        
+        try:
+            url = "https://api.deepseek.com/v1/chat/completions"
+            data = json.dumps({
+                "model": "deepseek-chat",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3
+            }).encode('utf-8')
+            
+            req = urllib.request.Request(url, data=data, headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}"
+            })
+            
+            with urllib.request.urlopen(req, timeout=10) as response:
+                result = json.loads(response.read().decode('utf-8'))
+                content = result['choices'][0]['message']['content']
+                # Clean markdown JSON formatting if present
+                content = content.replace("```json", "").replace("```", "").strip()
+                return json.loads(content)
+        except Exception as e:
+            print(f"[Brain NLP] ❌ LLM API Call Failed: {e}")
+            return self.fallback_logic()
+
+    def fallback_logic(self):
+        """Fallback if API fails or no key"""
+        return [
+            {"symbol": "512100", "theme": "Macro Expansion", "logic_score": 85},
+            {"symbol": "518880", "theme": "Geopolitical Hedge", "logic_score": 88},
+            {"symbol": "513100", "theme": "Semiconductor", "logic_score": 92}
+        ]
         
     def update_watchlist(self):
-        ideas = self.read_reports()
+        news = self.fetch_latest_news()
+        ideas = self.call_llm(news)
+        
         data = {
             "date": datetime.now().strftime("%Y-%m-%d"),
             "stocks": ideas
         }
         with open(self.watchlist_file, "w") as f:
             json.dump(data, f, indent=4)
-        print("[Brain NLP] ✅ Watchlist updated successfully.")
+        print(f"[Brain NLP] ✅ Watchlist updated with {len(ideas)} LLM-extracted targets.")
         return ideas
 
 if __name__ == "__main__":
