@@ -1,12 +1,14 @@
 import json
 import os
 import datetime
+from capital_flow_voter import CapitalFlowVoter
 
 class ExecutionEngine:
     def __init__(self):
         self.state_file = "data/portfolio_state.json"
         self.total_equity = 1000000.0 # 1 million RMB starting capital
         self.risk_per_trade = 0.01    # 1% risk of total equity per trade
+        self.price_fetcher = CapitalFlowVoter()
         
         os.makedirs("data", exist_ok=True)
         if not os.path.exists(self.state_file):
@@ -22,21 +24,54 @@ class ExecutionEngine:
             json.dump(state, f, indent=4)
             
     def calculate_atr(self, symbol):
-        # Mock ATR calculation. In real life, call akshare for the last 14 days and calc ATR.
-        # Let's assume a highly volatile tech stock has ATR 5.0, stable ETF has ATR 1.0.
+        # Mock ATR. Real system would calculate 14-day ATR from daily data.
         if symbol.startswith("300"): return 5.0
-        elif symbol.startswith("51"): return 1.5
-        else: return 3.0
+        elif symbol.startswith("51") or symbol.startswith("15"): return 0.5
+        else: return 1.5
+
+    def manage_existing_positions(self, state):
+        positions = state["positions"]
+        cash = state["cash"]
+        symbols_to_remove = []
+        
+        for sym, data in positions.items():
+            df = self.price_fetcher.fetch_stock_data_with_retry(sym, retries=2)
+            if df.empty:
+                print(f"  -> ⚠️ Could not fetch current price for {sym}. Skipping stop-loss check.")
+                continue
+                
+            current_price = df.iloc[-1]['收盘']
+            
+            # Trailing Stop Logic: If current price - ATR*2 is higher than old stop_loss, raise the stop_loss
+            atr = self.calculate_atr(sym)
+            potential_new_stop = current_price - (atr * 2.0)
+            if potential_new_stop > data["stop_loss"]:
+                data["stop_loss"] = potential_new_stop
+                print(f"  -> 🛡️ {sym} Trailing Stop raised to {potential_new_stop:.2f} (Current Price: {current_price:.2f})")
+                
+            # Sell Logic: If price drops below stop loss
+            if current_price <= data["stop_loss"]:
+                print(f"  -> 🚨 SELL TRIGGERED: {sym} hit stop loss! Executing liquidation.")
+                sell_value = current_price * data["shares"]
+                cash += sell_value
+                symbols_to_remove.append(sym)
+                print(f"     Sold {data['shares']} shares at {current_price:.2f}. Returned {sell_value:.2f} to cash.")
+                
+        for sym in symbols_to_remove:
+            del positions[sym]
+            
+        state["cash"] = cash
+        state["positions"] = positions
+        return state
 
     def execute_trades(self, targets):
-        print(f"\\n[Execution Engine] ⚔️ Commencing tactical sniper execution for {len(targets)} targets...")
+        print(f"\\n[Execution Engine] ⚔️ Commencing tactical sniper execution...")
         state = self.load_state()
+        
+        # 1. Manage existing positions (Trailing Stop & Sells)
+        state = self.manage_existing_positions(state)
         cash = state["cash"]
         positions = state["positions"]
-        
-        # 1. Manage existing positions (Trailing Stop)
-        # In a real system, we fetch current price and check against stop loss.
-        # For this scaffolding, we skip.
         
         # 2. Open new positions
         for target in targets:
@@ -47,35 +82,38 @@ class ExecutionEngine:
                 print(f"  -> ⏭️ Already holding {sym}. Skipping.")
                 continue
                 
+            df = self.price_fetcher.fetch_stock_data_with_retry(sym, retries=2)
+            if df.empty:
+                print(f"  -> 🛑 Could not fetch price to buy {sym}. Skipping.")
+                continue
+                
+            current_price = df.iloc[-1]['收盘']
             atr = self.calculate_atr(sym)
             stop_distance = atr * 2.0
             
-            # Risk Parity Position Sizing
-            # Formula: Capital at Risk = Total Equity * 1%
-            # Shares = Capital at Risk / Stop Distance
-            capital_at_risk = self.total_equity * self.risk_per_trade
+            capital_at_risk = (cash + sum([p["shares"]*p["entry_price"] for p in positions.values()])) * self.risk_per_trade
             shares_to_buy = int(capital_at_risk / stop_distance)
             
-            # Assuming current price is 100 for simplicity (in real life, fetch price)
-            mock_price = 100.0
-            total_cost = shares_to_buy * mock_price
+            # Ensure we buy in lots of 100
+            shares_to_buy = max(100, (shares_to_buy // 100) * 100)
+            total_cost = shares_to_buy * current_price
             
             if cash >= total_cost:
                 cash -= total_cost
                 positions[sym] = {
                     "shares": shares_to_buy,
-                    "entry_price": mock_price,
-                    "stop_loss": mock_price - stop_distance,
+                    "entry_price": current_price,
+                    "stop_loss": current_price - stop_distance,
                     "theme": theme,
                     "date_entered": datetime.datetime.now().strftime("%Y-%m-%d")
                 }
                 print(f"  -> 🎯 BUY ORDER EXECUTED: {sym} (Logic: {theme})")
-                print(f"     Shares: {shares_to_buy} | Risk/Trade: 1% | Stop Loss Set at: {mock_price - stop_distance:.2f}")
+                print(f"     Shares: {shares_to_buy} | Price: {current_price:.2f} | Stop Loss Set at: {current_price - stop_distance:.2f}")
             else:
                 print(f"  -> 🛑 INSUFFICIENT FUNDS to buy {sym}. Cash: {cash:.2f}, Needed: {total_cost:.2f}")
                 
-        if not targets:
-            print("[Execution Engine] ⚠️ No new targets passed the ultimate V4 filter. Monitoring existing positions.")
+        if not targets and not positions:
+            print("[Execution Engine] ⚠️ No active targets. Holding 100% Cash.")
             
         state["cash"] = cash
         state["positions"] = positions
@@ -84,4 +122,4 @@ class ExecutionEngine:
             
 if __name__ == "__main__":
     engine = ExecutionEngine()
-    engine.execute_trades([{"symbol": "513100", "theme": "US Tech Resilience"}])
+    engine.execute_trades([])

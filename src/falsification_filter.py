@@ -21,26 +21,44 @@ class FalsificationFilter:
         return 50.0 
         
     def get_specific_macro(self, theme):
-        """Map themes to specific Akshare alternative data"""
+        """Map themes to specific Sector ETFs as alternative data proxies"""
         theme = theme.lower()
+        proxy_symbol = None
+        
         if 'ship' in theme or 'export' in theme or 'freight' in theme:
-            print("    -> [Mapping] Found Shipping Theme. Checking BDI/CCFI...")
-            # For simplicity in this scaffolding, we simulate the specific macro pull if akshare fails
-            # Real implementation would call: ak.index_bdi()
-            return True # Assuming BDI is expanding
+            print("    -> [Mapping] Found Shipping Theme. Using Shipping ETF (159765) as proxy...")
+            proxy_symbol = "159765"
             
         elif 'pork' in theme or 'agri' in theme:
-            print("    -> [Mapping] Found Agriculture Theme. Checking Spot Prices...")
-            return True
+            print("    -> [Mapping] Found Agriculture Theme. Using Agri ETF (159825) as proxy...")
+            proxy_symbol = "159825"
             
         elif 'semi' in theme or 'tech' in theme or 'ai' in theme:
-            print("    -> [Mapping] Found Tech Theme. Checking Semiconductor Index...")
-            return True
+            print("    -> [Mapping] Found Tech Theme. Using Semiconductor ETF (512480) as proxy...")
+            proxy_symbol = "512480"
             
         elif 'gold' in theme or 'hedge' in theme:
-            print("    -> [Mapping] Found Safe Haven Theme. Checking US Yields & VIX...")
-            return True
+            print("    -> [Mapping] Found Safe Haven Theme. Using Gold ETF (518880) as proxy...")
+            proxy_symbol = "518880"
             
+        if proxy_symbol:
+            # We import CapitalFlowVoter to use its robust fetcher
+            from capital_flow_voter import CapitalFlowVoter
+            fetcher = CapitalFlowVoter()
+            df = fetcher.fetch_stock_data_with_retry(proxy_symbol, retries=2)
+            if not df.empty and len(df) >= 20:
+                df['ma20'] = df['收盘'].rolling(20).mean()
+                latest = df.iloc[-1]
+                if latest['收盘'] >= latest['ma20']:
+                    print(f"      -> 📈 Sector Proxy ({proxy_symbol}) is in uptrend. Validated.")
+                    return True
+                else:
+                    print(f"      -> 📉 Sector Proxy ({proxy_symbol}) is in downtrend. Failed Validation.")
+                    return False
+            else:
+                print(f"      -> ⚠️ Could not fetch proxy {proxy_symbol}. Assuming true for safety.")
+                return True
+                
         return True # Default pass if no specific mapping
 
     def check_macro_data(self, theme):

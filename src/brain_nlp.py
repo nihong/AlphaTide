@@ -41,6 +41,18 @@ class NLPBrain:
             return self.fallback_logic()
 
         print("[Brain NLP] 🧠 Connecting to DeepSeek API for NLP analysis...")
+        
+        # Memory retrieval
+        memory_file = "data/brain_memory.json"
+        historical_context = "No previous history."
+        if os.path.exists(memory_file):
+            try:
+                with open(memory_file, "r") as f:
+                    mem_data = json.load(f)
+                    historical_context = f"Yesterday you extracted: {json.dumps(mem_data[-1]['themes'])}. Consider if these themes are fading or strengthening."
+            except:
+                pass
+
         prompt = f"""
         You are a top-tier Quantitative Financial Analyst. 
         Read the following macro news and extract 3 high-conviction investment themes.
@@ -50,6 +62,8 @@ class NLPBrain:
             {{"symbol": "513100", "theme": "Semiconductor", "logic_score": 90}},
             ...
         ]
+        
+        {historical_context}
         
         News Text:
         {news_text}
@@ -73,18 +87,36 @@ class NLPBrain:
                 content = result['choices'][0]['message']['content']
                 # Clean markdown JSON formatting if present
                 content = content.replace("```json", "").replace("```", "").strip()
-                return json.loads(content)
+                parsed_json = json.loads(content)
+                
+                # Save memory
+                try:
+                    mem_list = []
+                    if os.path.exists(memory_file):
+                        with open(memory_file, "r") as f:
+                            mem_list = json.load(f)
+                    mem_list.append({"date": datetime.now().strftime("%Y-%m-%d"), "themes": [x['theme'] for x in parsed_json]})
+                    with open(memory_file, "w") as f:
+                        json.dump(mem_list[-5:], f) # Keep last 5 days
+                except Exception as e:
+                    print(f"Memory save error: {e}")
+                    
+                return parsed_json
         except Exception as e:
             print(f"[Brain NLP] ❌ LLM API Call Failed: {e}")
             return self.fallback_logic()
 
     def fallback_logic(self):
-        """Fallback if API fails or no key"""
-        return [
-            {"symbol": "512100", "theme": "Macro Expansion", "logic_score": 85},
-            {"symbol": "518880", "theme": "Geopolitical Hedge", "logic_score": 88},
-            {"symbol": "513100", "theme": "Semiconductor", "logic_score": 92}
-        ]
+        """Fallback if API fails or no key. We read from manual watchlist populated by the Assistant."""
+        print("[Brain NLP] 🧑‍💻 Using manual Assistant-populated watchlist...")
+        if os.path.exists(self.watchlist_file):
+            try:
+                with open(self.watchlist_file, "r") as f:
+                    data = json.load(f)
+                    return data.get("stocks", [])
+            except:
+                return []
+        return []
         
     def update_watchlist(self):
         news = self.fetch_latest_news()
