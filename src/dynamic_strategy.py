@@ -3,7 +3,7 @@ import pandas as pd
 
 def generate_signals(df):
     ma_f = df['收盘'].rolling(7).mean()
-    ma_s = df['收盘'].rolling(85).mean()
+    ma_s = df['收盘'].rolling(86).mean()
     buy_signal = (ma_f > ma_s) & (ma_f.shift(1) <= ma_s.shift(1))
     
     tr1 = df['最高'] - df['最低']
