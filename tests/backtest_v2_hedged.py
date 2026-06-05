@@ -35,6 +35,7 @@ def git_commit_and_push(version, profit, drawdown, msg_detail):
         pass
 
 def update_readme(version, total_trades, win_rate, avg_profit, max_drawdown):
+    report_path = "reports/backtest_may_7y.md"
     report = f"""
 # 💎 Top-1 基金经理级别：全天候对冲钻石策略 (V{version})
 
@@ -56,9 +57,9 @@ def update_readme(version, total_trades, win_rate, avg_profit, max_drawdown):
 ## 迭代结论
 通过加入港股流动性支持与宏观对冲机制，该策略在熊市期间自动赚取做空指数的保护费，极大降低了回撤，实现了一条平滑向上的资金曲线！
 """
-    with open("backtest_may_7y.md", "w", encoding="utf-8") as f:
+    with open(report_path, "w", encoding="utf-8") as f:
         f.write(report)
-    print("✅ 文档 backtest_may_7y.md 已更新。")
+    print(f"✅ 文档 {report_path} 已更新。")
 
 
 def run_v2_hedged_backtest(version="2.0"):
@@ -92,8 +93,16 @@ def run_v2_hedged_backtest(version="2.0"):
             hist['日期'] = pd.to_datetime(hist['日期'])
             db[symbol] = {'sector': sector, 'hist': hist, 'fin': fin, 'is_hk': is_hk}
             
-    # 2. 模拟按月回测
-    test_dates = [datetime(y, 5, 15).strftime('%Y-%m-%d') for y in range(2020, 2027)]
+    # 2. 模拟按月回测 (过往7年5月份每个交易日)
+    test_dates = []
+    for y in range(2020, 2027):
+        for day in range(1, 32):
+            try:
+                dt = datetime(y, 5, day)
+                if dt.weekday() < 5:  # 排除周末
+                    test_dates.append(dt.strftime('%Y-%m-%d'))
+            except ValueError:
+                pass # 忽略31号之类的非法日期（如果某个月没有）
     
     results = []
     
@@ -140,11 +149,24 @@ def run_v2_hedged_backtest(version="2.0"):
             buy_price = future_hist.iloc[0]['开盘']
             
             sell_price = buy_price
+            sell_date = future_hist.iloc[0]['日期']
+            sell_reason = "强制平仓(60日)"
             holding_days = 0
+            
             for _, row in future_hist.iterrows():
                 holding_days += 1
+                
+                # 绝对止损 -15%
+                if (row['收盘'] - buy_price) / buy_price <= -0.15:
+                    sell_price = row['收盘']
+                    sell_date = row['日期']
+                    sell_reason = "止损(-15%)"
+                    break
+                    
                 if holding_days >= 60:
                     sell_price = row['收盘']
+                    sell_date = row['日期']
+                    sell_reason = "止盈(60日)"
                     break
                     
             long_return = (sell_price - buy_price) / buy_price
@@ -158,7 +180,9 @@ def run_v2_hedged_backtest(version="2.0"):
                 strat = "单边多头 (牛市满仓)"
                 
             results.append({
-                'date': date_str,
+                'buy_date': date_str,
+                'sell_date': sell_date,
+                'sell_reason': sell_reason,
                 'symbol': symbol,
                 'strategy': strat,
                 'profit_pct': total_return,
@@ -180,18 +204,22 @@ def run_v2_hedged_backtest(version="2.0"):
         print(f"单次平均收益: {avg_profit:.2%}")
         print(f"最大回撤拦截: {max_drawdown:.2%}")
         
+        # 删除旧文件，保留整洁
+        if os.path.exists("reports/v2_trades_detail.csv"):
+            os.remove("reports/v2_trades_detail.csv")
+            
         # 导出具体买卖明细
         df['profit_pct_str'] = df['profit_pct'].apply(lambda x: f"{x:.2%}")
         df['raw_long_str'] = df['raw_long'].apply(lambda x: f"{x:.2%}")
         df.to_csv("reports/v2_trades_detail.csv", index=False)
         print("\n📈 最近三年买卖明细 (2024-2026):")
-        recent_df = df[df['date'] >= '2024-01-01']
-        print(recent_df[['date', 'symbol', 'strategy', 'raw_long_str', 'profit_pct_str']].to_markdown())
+        recent_df = df[df['buy_date'] >= '2024-01-01']
+        print(recent_df[['buy_date', 'sell_date', 'symbol', 'strategy', 'sell_reason', 'raw_long_str', 'profit_pct_str']].to_markdown())
         
         print("\n🏆 HK 港股触发明细:")
         hk_df = df[df['symbol'].str.startswith('0') & (df['symbol'].str.len() == 5)]
         if not hk_df.empty:
-            print(hk_df[['date', 'symbol', 'strategy', 'raw_long_str', 'profit_pct_str']].to_markdown())
+            print(hk_df[['buy_date', 'sell_date', 'symbol', 'strategy', 'sell_reason', 'raw_long_str', 'profit_pct_str']].to_markdown())
         else:
             print("未能成功触发港股交易，或港股接口被拒。")
         
