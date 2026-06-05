@@ -77,7 +77,7 @@ class Screener:
             latest_price = df.iloc[-1]['收盘']
             latest_vol = df.iloc[-1]['成交量']
             
-            df['ema5'] = df['收盘'].ewm(span=15, adjust=False).mean()
+            df['ema5'] = df['收盘'].ewm(span=3, adjust=False).mean()
             df['ema20'] = df['收盘'].ewm(span=60, adjust=False).mean()
             df['ema60'] = df['收盘'].ewm(span=60, adjust=False).mean()
             
