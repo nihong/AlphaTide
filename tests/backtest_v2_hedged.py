@@ -106,6 +106,9 @@ def run_v2_hedged_backtest(version="2.0"):
     
     results = []
     
+    # 记录该股当月是否已经触发过，避免连续触发
+    triggered_this_month = set()
+    
     for date_str in test_dates:
         target_date_pd = pd.to_datetime(date_str)
         
@@ -130,6 +133,11 @@ def run_v2_hedged_backtest(version="2.0"):
         hedge_return = (idx_buy_price - idx_sell_price) / idx_buy_price # 做空收益
         
         for symbol, data in db.items():
+            # 获取当前年月
+            current_month_key = f"{symbol}_{target_date_pd.year}_{target_date_pd.month}"
+            if current_month_key in triggered_this_month:
+                continue
+                
             hist = data['hist']
             fin = data['fin']
             
@@ -153,8 +161,21 @@ def run_v2_hedged_backtest(version="2.0"):
             sell_reason = "强制平仓(60日)"
             holding_days = 0
             
+            # 记录本月已触发
+            triggered_this_month.add(current_month_key)
+            
+            prev_close = future_hist.iloc[0]['收盘']
+            
             for _, row in future_hist.iterrows():
                 holding_days += 1
+                
+                # 修复港股未复权数据导致的“除权除息暴跌”假象
+                # 如果单日跌幅超过 30%，判定为分红/拆股，对买入价进行同比例下调复权
+                if row['收盘'] / prev_close < 0.70:
+                    split_ratio = row['收盘'] / prev_close
+                    buy_price = buy_price * split_ratio
+                    
+                prev_close = row['收盘']
                 
                 # 绝对止损 -15%
                 if (row['收盘'] - buy_price) / buy_price <= -0.15:
