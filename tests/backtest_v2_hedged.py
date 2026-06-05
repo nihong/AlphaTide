@@ -180,6 +180,13 @@ def run_v2_hedged_backtest(version="2.0"):
         print(f"单次平均收益: {avg_profit:.2%}")
         print(f"最大回撤拦截: {max_drawdown:.2%}")
         
+        # 导出具体买卖明细
+        df['profit_pct_str'] = df['profit_pct'].apply(lambda x: f"{x:.2%}")
+        df['raw_long_str'] = df['raw_long'].apply(lambda x: f"{x:.2%}")
+        df.to_csv("reports/v2_trades_detail.csv", index=False)
+        print("\n📈 具体买卖明细 (前20条):")
+        print(df[['date', 'symbol', 'strategy', 'raw_long_str', 'profit_pct_str']].head(20).to_markdown())
+        
         update_readme(version, total_trades, win_rate, avg_profit, max_drawdown)
         git_commit_and_push(version, avg_profit, max_drawdown, "Added Market-Neutral Hedging & HK Stocks")
     else:
