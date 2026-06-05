@@ -40,7 +40,8 @@ class ExecutionEngine:
                 print(f"  -> ⚠️ Could not fetch current price for {sym}. Skipping stop-loss check.")
                 continue
                 
-            current_price = df.iloc[-1]['收盘']
+            latest = df.iloc[-1]
+            current_price = latest['收盘']
             
             # Trailing Stop Logic: If current price - ATR*2 is higher than old stop_loss, raise the stop_loss
             atr = self.calculate_atr(sym)
@@ -51,11 +52,15 @@ class ExecutionEngine:
                 
             # Sell Logic: If price drops below stop loss
             if current_price <= data["stop_loss"]:
-                print(f"  -> 🚨 SELL TRIGGERED: {sym} hit stop loss! Executing liquidation.")
-                sell_value = current_price * data["shares"]
-                cash += sell_value
-                symbols_to_remove.append(sym)
-                print(f"     Sold {data['shares']} shares at {current_price:.2f}. Returned {sell_value:.2f} to cash.")
+                # Limit-Down Check (跌停板无法卖出)
+                if '最低' in latest and latest['收盘'] == latest['最低'] and latest['最低'] < latest['开盘']:
+                    print(f"  -> 🚨 SELL TRIGGERED for {sym}, but stock is LIMIT-DOWN (close == low). Trapped! Cannot sell.")
+                else:
+                    print(f"  -> 🚨 SELL TRIGGERED: {sym} hit stop loss! Executing liquidation.")
+                    sell_value = current_price * data["shares"]
+                    cash += sell_value
+                    symbols_to_remove.append(sym)
+                    print(f"     Sold {data['shares']} shares at {current_price:.2f}. Returned {sell_value:.2f} to cash.")
                 
         for sym in symbols_to_remove:
             del positions[sym]
@@ -73,6 +78,9 @@ class ExecutionEngine:
         cash = state["cash"]
         positions = state["positions"]
         
+        # Extract existing themes for Correlation Mutex Lock
+        existing_themes = [p['theme'] for p in positions.values()]
+        
         # 2. Open new positions
         for target in targets:
             sym = target['symbol']
@@ -80,6 +88,11 @@ class ExecutionEngine:
             
             if sym in positions:
                 print(f"  -> ⏭️ Already holding {sym}. Skipping.")
+                continue
+                
+            # Theme Correlation Lock
+            if theme in existing_themes:
+                print(f"  -> 🛑 THEME CORRELATION LOCK: Already holding a stock with theme '{theme}'. Skipping {sym} to prevent crash correlation.")
                 continue
                 
             df = self.price_fetcher.fetch_stock_data_with_retry(sym, retries=2)

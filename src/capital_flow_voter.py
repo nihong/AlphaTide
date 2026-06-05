@@ -76,42 +76,56 @@ class CapitalFlowVoter:
         df = self.fetch_stock_data_with_retry(symbol)
         if df.empty or len(df) < 20:
             print(f"  -> ❓ [Flow Voter] Symbol {symbol}: Insufficient data after retries.")
-            return False
+            return False, 0.0
             
         df['vol_ma20'] = df['成交量'].rolling(20).mean()
         df['price_ma20'] = df['收盘'].rolling(20).mean()
         
         latest = df.iloc[-1]
         
+        # 1. Limit-Up Check (涨停板物理拦截)
+        if '最高' in latest and latest['收盘'] == latest['最高'] and latest['最高'] > latest['开盘']:
+            print(f"  -> 🛑 [Flow Voter] Symbol {symbol}: Limit-Up detected (close == high). Cannot buy. Rejected.")
+            return False, 0.0
+            
         vol_breakout = latest['成交量'] > (latest['vol_ma20'] * 1.5)
         price_uptrend = latest['收盘'] > latest['price_ma20']
         
+        # Calculate Momentum (ROC)
+        momentum_score = (latest['收盘'] - latest['price_ma20']) / latest['price_ma20']
+        
         if vol_breakout and price_uptrend:
-            print(f"  -> 💸 [Flow Voter] Symbol {symbol}: Smart Money accumulation detected! Vol={latest['成交量']}, MA20={latest['vol_ma20']:.0f}")
-            return True
+            print(f"  -> 💸 [Flow Voter] Symbol {symbol}: Smart Money accumulation! Vol={latest['成交量']}, Momentum={momentum_score:.2%}")
+            return True, momentum_score
         else:
             reason = "No Volume Breakout" if not vol_breakout else "Price Below MA20"
             print(f"  -> 🐢 [Flow Voter] Symbol {symbol}: Rejected. Reason: {reason}")
-            return False
+            return False, 0.0
         
     def vote(self, candidates):
-        print(f"[Flow Voter] 🗳️ Initiating Capital Flow Voting for {len(candidates)} candidates...")
+        print(f"[Flow Voter] 🗳️ Initiating Capital Flow Voting & Cross-Sectional Ranking for {len(candidates)} candidates...")
         
         # Sector Resonance Check
         resonance = self.check_sector_resonance()
         
-        approved = []
+        scored_candidates = []
         for stock in candidates:
             # If sector resonance is bad, we demand even stricter volume (or we just reject)
-            # For simplicity, if resonance is bad, we reject high-beta names
             if not resonance and stock['symbol'].startswith("300"):
                 print(f"  -> 🛑 [Flow Voter] Symbol {stock['symbol']} rejected due to poor Sector Resonance.")
                 continue
                 
-            if self.check_smart_money(stock['symbol']):
-                approved.append(stock)
+            passed, score = self.check_smart_money(stock['symbol'])
+            if passed:
+                stock['momentum'] = score
+                scored_candidates.append(stock)
                 
-        print(f"[Flow Voter] 🏆 {len(approved)} stocks passed the Smart Money test.")
+        # 2. Winner Takes All Ranking (赢者通吃)
+        # Sort descending by momentum score and take top 3
+        scored_candidates.sort(key=lambda x: x.get('momentum', 0), reverse=True)
+        approved = scored_candidates[:3]
+                
+        print(f"[Flow Voter] 🏆 {len(approved)} stocks passed and ranked as Top Tier targets.")
         return approved
 
 if __name__ == "__main__":

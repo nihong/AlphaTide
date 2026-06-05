@@ -118,9 +118,44 @@ class NLPBrain:
                 return []
         return []
         
+    def validate_symbols(self, ideas):
+        """Cross-check LLM symbols against real A-share/ETF codes"""
+        print("[Brain NLP] 🔍 Validating LLM symbols against real market database...")
+        try:
+            # We fetch real codes. Using a simple approach here.
+            # In a full system, you might cache this to disk.
+            valid_df = ak.stock_info_a_code_name()
+            valid_codes = set(valid_df['code'].tolist())
+            
+            # ETFs also exist, typically starting with 51 or 15
+            
+            validated_ideas = []
+            for idea in ideas:
+                sym = idea['symbol']
+                name = valid_df[valid_df['code'] == sym]['name'].values
+                is_st = False
+                if len(name) > 0 and 'ST' in name[0].upper():
+                    is_st = True
+                
+                # Check if it's a valid stock or looks like a valid ETF
+                if sym in valid_codes or sym.startswith("51") or sym.startswith("15"):
+                    if not is_st:
+                        validated_ideas.append(idea)
+                    else:
+                        print(f"  -> 🗑️ Dropped {sym}: ST/Delisting risk detected.")
+                else:
+                    print(f"  -> 🗑️ Dropped {sym}: Hallucinated or invalid symbol.")
+            return validated_ideas
+        except Exception as e:
+            print(f"[Brain NLP] ⚠️ Validation API failed: {e}. Passing symbols blindly.")
+            return ideas
+
     def update_watchlist(self):
         news = self.fetch_latest_news()
-        ideas = self.call_llm(news)
+        raw_ideas = self.call_llm(news)
+        
+        # 1. New Feature: Symbol Validation
+        ideas = self.validate_symbols(raw_ideas)
         
         data = {
             "date": datetime.now().strftime("%Y-%m-%d"),
@@ -128,7 +163,7 @@ class NLPBrain:
         }
         with open(self.watchlist_file, "w") as f:
             json.dump(data, f, indent=4)
-        print(f"[Brain NLP] ✅ Watchlist updated with {len(ideas)} LLM-extracted targets.")
+        print(f"[Brain NLP] ✅ Watchlist updated with {len(ideas)} validated LLM-extracted targets.")
         return ideas
 
 if __name__ == "__main__":
