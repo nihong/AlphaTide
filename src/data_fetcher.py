@@ -145,6 +145,25 @@ def fetch_a_stock_hist_cached(symbol: str, period: str = "daily", start_date: st
         adjust=adjust
     )
 
+def _fetch_hk_stock_hist(symbol: str):
+    df = ak.stock_hk_daily(symbol=symbol)
+    if df is not None and not df.empty:
+        rename_map = {'date': '日期', 'open': '开盘', 'close': '收盘', 'high': '最高', 'low': '最低', 'volume': '成交量', 'amount': '成交额'}
+        df = df.rename(columns=rename_map)
+        if '日期' in df.columns: df['日期'] = df['日期'].astype(str)
+        return df
+    return pd.DataFrame()
+
+def fetch_hk_stock_hist_cached(symbol: str, expiry_hours: int = 4):
+    """获取港股历史K线，带有缓存"""
+    cache_key = f"hist_hk_{symbol}"
+    return fetch_with_cache(
+        cache_key,
+        _fetch_hk_stock_hist,
+        expiry_hours=expiry_hours,
+        symbol=symbol
+    )
+
 
 def fetch_a_stock_financials(symbol: str):
     """获取A股财报摘要，带24小时缓存"""

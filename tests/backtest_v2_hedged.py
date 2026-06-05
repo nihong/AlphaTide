@@ -7,7 +7,7 @@ import subprocess
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.screener import Screener
-from src.data_fetcher import fetch_a_stock_hist_cached, fetch_a_stock_financials, fetch_hk_stock_financials, fetch_market_index
+from src.data_fetcher import fetch_a_stock_hist_cached, fetch_a_stock_financials, fetch_hk_stock_financials, fetch_market_index, fetch_hk_stock_hist_cached
 
 # 新增：加入顶级港股白马以及A股核心池
 CORE_ASSETS = {
@@ -82,7 +82,7 @@ def run_v2_hedged_backtest(version="2.0"):
         
         # 港股数据拉取
         if is_hk:
-            hist = fetch_a_stock_hist_cached(symbol) # akshare 某些接口通用，这里用缓存函数假设能拉到
+            hist = fetch_hk_stock_hist_cached(symbol)
             fin = fetch_hk_stock_financials(symbol)
         else:
             hist = fetch_a_stock_hist_cached(symbol)
@@ -184,8 +184,16 @@ def run_v2_hedged_backtest(version="2.0"):
         df['profit_pct_str'] = df['profit_pct'].apply(lambda x: f"{x:.2%}")
         df['raw_long_str'] = df['raw_long'].apply(lambda x: f"{x:.2%}")
         df.to_csv("reports/v2_trades_detail.csv", index=False)
-        print("\n📈 具体买卖明细 (前20条):")
-        print(df[['date', 'symbol', 'strategy', 'raw_long_str', 'profit_pct_str']].head(20).to_markdown())
+        print("\n📈 最近三年买卖明细 (2024-2026):")
+        recent_df = df[df['date'] >= '2024-01-01']
+        print(recent_df[['date', 'symbol', 'strategy', 'raw_long_str', 'profit_pct_str']].to_markdown())
+        
+        print("\n🏆 HK 港股触发明细:")
+        hk_df = df[df['symbol'].str.startswith('0') & (df['symbol'].str.len() == 5)]
+        if not hk_df.empty:
+            print(hk_df[['date', 'symbol', 'strategy', 'raw_long_str', 'profit_pct_str']].to_markdown())
+        else:
+            print("未能成功触发港股交易，或港股接口被拒。")
         
         update_readme(version, total_trades, win_rate, avg_profit, max_drawdown)
         git_commit_and_push(version, avg_profit, max_drawdown, "Added Market-Neutral Hedging & HK Stocks")
