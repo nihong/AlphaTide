@@ -35,50 +35,57 @@ class AIAnalyst:
         except Exception as e:
             return f"❌ AI 分析发生错误: {e}"
 
-    def extract_hot_industries_from_reports(self, consensus_stocks_df):
+    def extract_hot_industries_from_reports(self, valid_reports):
         """
-        利用大模型对研报储备池中的个股进行归纳，提取出最核心的 Top 3 行业。
+        利用大模型对新提取的数十篇研报标题和机构进行深度提纯，找出真正的共识主线。
         """
-        if consensus_stocks_df.empty:
-            return []
+        if not valid_reports:
+            return {}
             
         # 将储备池个股拼接成文本
-        stocks_text = ""
-        for _, row in consensus_stocks_df.iterrows():
-            stocks_text += f"{row['名称']}({row['代码']}) - 研报数:{row['研报数']}, 预期增速:{row['预期增速']:.2%}\n"
+        reports_text = ""
+        for i, r in enumerate(valid_reports[:30]): # 取前30篇防超长
+            reports_text += f"{i+1}. 【{r['industry']}】{r['stock']} - {r['title']} (机构:{r['institution']}, 评级:{r['rating']})\n"
             
         prompt = f"""
-你是一位顶级的宏观策略分析师。以下是近期获得华尔街及国内头部券商机构“最高频覆盖”且“盈利预期增速最快”的 A 股上市公司名单：
+你是一位顶级的宏观策略分析师。以下是我们使用“资金动态雷达”捕获到的当日全市场最活跃标的，并定向提取到的国内头部券商最新深度研报摘要：
 
-{stocks_text}
+{reports_text}
 
-请根据你的知识库，判断这些公司分别属于哪些产业链或行业（如：光通信、半导体、航运、生猪养殖等）。
-请从中提取出共振最强烈的 Top 3 行业名称。
-注意：
-1. 只输出最核心的 3 个行业名称。
-2. 必须以严格的 JSON 格式输出，格式如下：
-{{"recommended_sectors": ["行业1", "行业2", "行业3"]}}
-不要输出任何其他解释性文字！
+请你阅读这些研报摘要，找出当下券商“看多共识最强烈”的 Top 3 行业/题材。
+对于每个找出的行业，请提炼：
+1. 核心看多逻辑（为什么看多？是产量紧缺、政策利好还是业绩爆发？）
+2. 宏观打假关键词（即：如果要验证这个行业的景气度，应该看什么宏观数据？比如航运看BDI指数，铜看COMEX期铜，消费看CPI，出海看出口同比，煤炭看动力煤价格等）。
+
+必须以严格的 JSON 格式输出，格式如下（不要输出任何其他解释性文字，只输出JSON！）：
+{{
+    "recommended_sectors": [
+        {{
+            "name": "行业名称(如: 航运/工业金属/乘用车)",
+            "reason": "看多核心逻辑概括(20字以内)",
+            "macro_indicator": "用来验证真伪的宏观数据关键词"
+        }}
+    ]
+}}
 """
         response = self.analyze_with_llm(prompt)
         
-        # 尝试解析 JSON
+        # 解析 JSON
         import json
         import re
         try:
-            # 使用正则提取 JSON 块以防模型包含多余文字
             match = re.search(r'\{.*\}', response, re.DOTALL)
             if match:
                 json_str = match.group(0)
                 data = json.loads(json_str)
-                if 'recommended_sectors' in data:
-                    return data['recommended_sectors']
-            else:
-                data = json.loads(response)
-                return data.get('recommended_sectors', [])
+                sectors = data.get('recommended_sectors', [])
+                
+                # 转换成以名称为 key 的字典格式，方便 validator 直接吸收
+                return {sec['name']: sec for sec in sectors}
+            return {}
         except Exception as e:
-            print(f"⚠️ 解析 AI 行业输出失败: {response} | Error: {e}")
-            return []
+            print(f"⚠️ 解析 AI 研报提纯输出失败: {response} | Error: {e}")
+            return {}
 
     def generate_report_prompt(self, symbol, market, financial_data, screening_result):
         """

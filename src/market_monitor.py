@@ -253,8 +253,21 @@ class MarketMonitor:
                 sectors_to_scan.append({'name': name, 'label': label, 'type': '动量热门', 'is_new': is_new})
             print(f"🔥 锁定 Top 3 热门板块: {[s['name'] for s in sectors_to_scan if s['type'] == '动量热门']}")
 
+        # 2.5 全息研报雷达：自动抓取全市场最新深度研报，利用大模型提取看多共识主线
+        print("\n📡 [启动全局视野] 正在获取全市场机构研报并提取共识行业...")
+        try:
+            reports = self.validator.scan_broker_reports(target_date=target_date)
+            if reports:
+                ai_consensus_sectors = self.analyst.extract_hot_industries_from_reports(reports)
+                for sec_name, sec_info in ai_consensus_sectors.items():
+                    # 动态纳入到宏观验证池
+                    reason_msg = f"券商共识: {sec_info.get('reason')} (建议验证: {sec_info.get('macro_indicator')})"
+                    self.validator.update_dynamic_pool(sec_name, reason_msg)
+        except Exception as e:
+            print(f"⚠️ 研报雷达扫描失败: {e}")
+
         # 注入宏观验证防线 (Macro-Validated Pool)
-        print("\n🔎 [启动宏观打假引擎] 验证本地行业库...")
+        print("\n🔎 [启动宏观打假引擎] 验证并淘汰本地行业库过期个股...")
         self.validator.run_eviction_check()
         macro_sectors = self.validator.active_sectors
         for sec_name, sec_info in macro_sectors.items():

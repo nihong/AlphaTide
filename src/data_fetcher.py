@@ -262,3 +262,22 @@ if __name__ == "__main__":
     hk_data = fetch_hk_stock_financials("00700")
     if hk_data is not None:
         print(hk_data.head())
+
+
+def get_dynamic_hot_symbols(top_n=20):
+    """
+    动态雷达：获取当日全市场成交额最大的 Top N 标的，以避免射箭画靶
+    """
+    try:
+        df = ak.stock_zh_a_spot()
+        # 清洗代码前缀 (sh/sz)
+        df['代码'] = df['代码'].apply(lambda x: str(x).replace('sh', '').replace('sz', '').replace('bj', ''))
+        # 根据成交额排序
+        df = df.sort_values(by='成交额', ascending=False)
+        # 过滤掉指数或异常代码，确保是正规A股 (60, 00, 30开头)
+        df = df[df['代码'].str.match(r'^(60|00|30)')]
+        return df.head(top_n)['代码'].tolist()
+    except Exception as e:
+        print(f"动态雷达抓取失败: {e}")
+        return []
+

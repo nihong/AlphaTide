@@ -3,13 +3,23 @@ import json
 import pandas as pd
 import akshare as ak
 from datetime import datetime, timedelta
+from src.data_fetcher import get_dynamic_hot_symbols
 
 POOL_FILE = "validated_sectors.json"
 
 class IndustryValidator:
     def __init__(self):
         self.pool_file = POOL_FILE
+        self.cache_file = "parsed_reports_cache.json"
         self.active_sectors = self._load_pool()
+        self.parsed_reports = self._load_cache()
+        
+        # 👑 核心白名单：匹配东方财富免费数据源中研究实力最强的券商（注：中信/中金等通常不公开发布至该免费接口）
+        self.TOP_TIER_INSTITUTIONS = [
+            "国信证券", "国金证券", "东吴证券", "民生证券", 
+            "中银证券", "开源证券", "华安证券", "信达证券", 
+            "西南证券", "太平洋", "东兴证券", "山西证券"
+        ]
 
     def _load_pool(self):
         if os.path.exists(self.pool_file):
@@ -17,24 +27,106 @@ class IndustryValidator:
                 return json.load(f)
         return {}
 
+    def _load_cache(self):
+        """加载已读研报的缓存，防止重复读取"""
+        if os.path.exists(self.cache_file):
+            with open(self.cache_file, 'r', encoding='utf-8') as f:
+                return set(json.load(f))
+        return set()
+
+    def _save_cache(self):
+        with open(self.cache_file, 'w', encoding='utf-8') as f:
+            json.dump(list(self.parsed_reports), f, ensure_ascii=False, indent=4)
+
     def _save_pool(self):
         with open(self.pool_file, 'w', encoding='utf-8') as f:
             json.dump(self.active_sectors, f, ensure_ascii=False, indent=4)
 
-    def scan_broker_reports(self):
+    def scan_broker_reports(self, target_symbols=None, target_date=None):
         """
-        第一步：扫描全市场最新研报，提取被密集覆盖的行业
+        全息研报雷达 (极速版)：
+        直接通过东方财富底层 API 抓取全市场最新研报，无需再扫描 5000 只个股。
+        执行【白名单过滤】与【去重审查】。
         """
-        print("🔍 正在扫描东方财富全市场研报...")
-        try:
-            # 获取最新研报
-            df = ak.stock_research_report_em()
-            # 根据行业类别进行词频统计或分组 (具体逻辑后续对接大模型进一步提纯)
-            print(f"✅ 成功抓取最新 {len(df)} 份研报。")
-            return df
-        except Exception as e:
-            print(f"❌ 研报抓取失败: {e}")
-            return None
+        valid_reports = []
+        
+        # 处理时间窗口
+        end_date = datetime.strptime(target_date, "%Y-%m-%d") if target_date else datetime.now()
+        start_date = end_date - timedelta(days=7)
+        
+        if not target_symbols:
+            print(f"🌐 [启动全市场极速雷达] 正在直接拉取全市场最新机构研报 (截止: {end_date.strftime('%Y-%m-%d')})...")
+            import requests
+            url = "https://reportapi.eastmoney.com/report/list"
+            params = {
+                "industryCode": "*", "pageSize": "200", "industry": "*",
+                "rating": "*", "ratingChange": "*", "beginTime": start_date.strftime("%Y-%m-%d"),
+                "endTime": end_date.strftime("%Y-%m-%d"), "pageNo": "1",
+                "fields": "", "qType": "0", "orgCode": "", "code": "*",
+                "rcode": "", "p": "1", "pageNum": "1", "pageNumber": "1",
+            }
+            try:
+                r = requests.get(url, params=params)
+                data = r.json()
+                if data and "data" in data and data["data"]:
+                    for item in data["data"]:
+                        inst = item.get('orgSName')
+                        title = item.get('title')
+                        stock = item.get('stockName')
+                        
+                        if inst not in self.TOP_TIER_INSTITUTIONS:
+                            continue
+                            
+                        cache_key = f"{stock}_{inst}_{title}"
+                        if cache_key in self.parsed_reports:
+                            continue
+                            
+                        valid_reports.append({
+                            'date': item.get('publishDate', '')[:10],
+                            'stock': stock,
+                            'title': title,
+                            'industry': item.get('indvInduName'),
+                            'institution': inst,
+                            'rating': item.get('emRatingName', '')
+                        })
+                        self.parsed_reports.add(cache_key)
+            except Exception as e:
+                print(f"获取全市场研报失败: {e}")
+        else:
+            print(f"🔍 正在拉取雷达锁定标的的研报 ({len(target_symbols)}只核心龙头)...")
+            for sym in target_symbols:
+                try:
+                    df = ak.stock_research_report_em(symbol=sym)
+                    if df is None or df.empty:
+                        continue
+                        
+                    for _, row in df.iterrows():
+                        inst = row.get('机构', '')
+                        title = row.get('报告名称', '')
+                        stock = row.get('股票简称', '')
+                        
+                        if inst not in self.TOP_TIER_INSTITUTIONS:
+                            continue
+                            
+                        cache_key = f"{stock}_{inst}_{title}"
+                        if cache_key in self.parsed_reports:
+                            continue
+                            
+                        valid_reports.append({
+                            'date': str(row.get('日期', '')),
+                            'stock': stock,
+                            'title': title,
+                            'industry': row.get('行业', ''),
+                            'institution': inst,
+                            'rating': row.get('东财评级', '')
+                        })
+                        self.parsed_reports.add(cache_key)
+                except Exception as e:
+                    continue
+                    
+        self._save_cache()
+        print(f"✅ 成功提取 {len(valid_reports)} 份【头部券商】全新研报（已剔除低质量/重复项）。")
+        return valid_reports
 
     def validate_macro_data(self, sector_name):
         """
