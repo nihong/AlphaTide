@@ -13,7 +13,6 @@ class NLPBrain:
             with open(self.watchlist_file, "w") as f:
                 json.dump({"date": "", "stocks": []}, f)
                 
-        # Load DeepSeek API Key from .env manually to avoid extra dependencies
         self.api_key = None
         if os.path.exists(".env"):
             with open(".env", "r") as f:
@@ -22,48 +21,47 @@ class NLPBrain:
                         self.api_key = line.strip().split("=")[1].strip(" '\"")
 
     def fetch_latest_news(self):
-        """Fetch real financial news summary from Akshare (e.g. CCTV news or Sina)"""
+        """Fetch real financial news summary from Akshare"""
         print("[Brain NLP] 📡 Fetching real macro and industry news via Akshare...")
         try:
-            # CCTV Xinwen Lianbo text summary is a great macro indicator in China
             df = ak.news_cctv(date=datetime.now().strftime("%Y%m%d"))
             if not df.empty:
                 news_text = "\\n".join(df['content'].head(10).tolist())
                 return news_text
         except Exception as e:
-            print(f"Failed to fetch CCTV news: {e}")
-            
-        return "Macro environment remains stable. Tech sector (Semiconductors) and Export/Shipping show strong resilience. Gold prices are fluctuating."
+            pass
+        return "Macro environment remains stable. Focus on domestic tech substitution, low-altitude economy, and high-yield dividend stocks."
 
-    def call_llm(self, news_text):
-        if not self.api_key:
-            print("[Brain NLP] ⚠️ DEEPSEEK_API_KEY not found in .env. Falling back to rule-based logic.")
-            return self.fallback_logic()
+    def call_llm_auditor(self, news_text, quant_pool):
+        """
+        The new AI Logic: Forensic Auditor.
+        It does NOT pick stocks out of thin air. It takes the objectively accumulating stocks
+        and checks if their sectors are supported by today's macro news.
+        """
+        if not self.api_key or not quant_pool:
+            print("[Brain NLP] ⚠️ No API key or empty pool. Blindly passing all quant stocks.")
+            return quant_pool
 
-        print("[Brain NLP] 🧠 Connecting to DeepSeek API for NLP analysis...")
+        print(f"[Brain NLP] 🧠 Connecting to DeepSeek to audit {len(quant_pool)} technically strong stocks...")
         
-        # Memory retrieval
-        memory_file = "data/brain_memory.json"
-        historical_context = "No previous history."
-        if os.path.exists(memory_file):
-            try:
-                with open(memory_file, "r") as f:
-                    mem_data = json.load(f)
-                    historical_context = f"Yesterday you extracted: {json.dumps(mem_data[-1]['themes'])}. Consider if these themes are fading or strengthening."
-            except:
-                pass
-
+        # We only send the top 10 from quant pool to save context window
+        top_candidates = quant_pool[:10]
+        symbols_str = ", ".join([p['symbol'] for p in top_candidates])
+        
         prompt = f"""
-        You are a top-tier Quantitative Financial Analyst. 
-        Read the following macro news and extract 3 high-conviction investment themes.
-        For each theme, provide ONE representative Chinese A-share or ETF ticker symbol (e.g. '513100' or '600519').
+        You are a top-tier Quantitative Financial Auditor.
+        Our Quant Radar has detected massive institutional money secretly buying the following A-share symbols over the last 10 days: 
+        [{symbols_str}]
+        
+        Read the macro news below. Your job is to act as a Forensic Auditor.
+        VETO (Reject) any stock if you believe the recent buying is just random speculation with NO solid policy or macro tailwind mentioned in the news or current global trends.
+        APPROVE the stock ONLY if its sector is clearly supported by strong, multi-month fundamentals.
+        
         Return ONLY valid JSON in this exact format:
         [
-            {{"symbol": "513100", "theme": "Semiconductor", "logic_score": 90}},
-            ...
+            {{"symbol": "000001", "decision": "APPROVE", "reason": "Bank sector supported by high dividend policy"}},
+            {{"symbol": "000002", "decision": "VETO", "reason": "No policy support for real estate currently"}}
         ]
-        
-        {historical_context}
         
         News Text:
         {news_text}
@@ -74,7 +72,7 @@ class NLPBrain:
             data = json.dumps({
                 "model": "deepseek-chat",
                 "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.3
+                "temperature": 0.1 # Low temp for analytical tasks
             }).encode('utf-8')
             
             req = urllib.request.Request(url, data=data, headers={
@@ -82,90 +80,44 @@ class NLPBrain:
                 "Authorization": f"Bearer {self.api_key}"
             })
             
-            with urllib.request.urlopen(req, timeout=10) as response:
+            with urllib.request.urlopen(req, timeout=15) as response:
                 result = json.loads(response.read().decode('utf-8'))
                 content = result['choices'][0]['message']['content']
-                # Clean markdown JSON formatting if present
                 content = content.replace("```json", "").replace("```", "").strip()
                 parsed_json = json.loads(content)
                 
-                # Save memory
-                try:
-                    mem_list = []
-                    if os.path.exists(memory_file):
-                        with open(memory_file, "r") as f:
-                            mem_list = json.load(f)
-                    mem_list.append({"date": datetime.now().strftime("%Y-%m-%d"), "themes": [x['theme'] for x in parsed_json]})
-                    with open(memory_file, "w") as f:
-                        json.dump(mem_list[-5:], f) # Keep last 5 days
-                except Exception as e:
-                    print(f"Memory save error: {e}")
-                    
-                return parsed_json
-        except Exception as e:
-            print(f"[Brain NLP] ❌ LLM API Call Failed: {e}")
-            return self.fallback_logic()
-
-    def fallback_logic(self):
-        """Fallback if API fails or no key. We read from manual watchlist populated by the Assistant."""
-        print("[Brain NLP] 🧑‍💻 Using manual Assistant-populated watchlist...")
-        if os.path.exists(self.watchlist_file):
-            try:
-                with open(self.watchlist_file, "r") as f:
-                    data = json.load(f)
-                    return data.get("stocks", [])
-            except:
-                return []
-        return []
-        
-    def validate_symbols(self, ideas):
-        """Cross-check LLM symbols against real A-share/ETF codes"""
-        print("[Brain NLP] 🔍 Validating LLM symbols against real market database...")
-        try:
-            # We fetch real codes. Using a simple approach here.
-            # In a full system, you might cache this to disk.
-            valid_df = ak.stock_info_a_code_name()
-            valid_codes = set(valid_df['code'].tolist())
-            
-            # ETFs also exist, typically starting with 51 or 15
-            
-            validated_ideas = []
-            for idea in ideas:
-                sym = idea['symbol']
-                name = valid_df[valid_df['code'] == sym]['name'].values
-                is_st = False
-                if len(name) > 0 and 'ST' in name[0].upper():
-                    is_st = True
+                # Filter out the vetoed ones
+                approved_symbols = [x['symbol'] for x in parsed_json if x.get('decision') == 'APPROVE']
                 
-                # Check if it's a valid stock or looks like a valid ETF
-                if sym in valid_codes or sym.startswith("51") or sym.startswith("15"):
-                    if not is_st:
-                        validated_ideas.append(idea)
-                    else:
-                        print(f"  -> 🗑️ Dropped {sym}: ST/Delisting risk detected.")
-                else:
-                    print(f"  -> 🗑️ Dropped {sym}: Hallucinated or invalid symbol.")
-            return validated_ideas
+                final_pool = [p for p in quant_pool if p['symbol'] in approved_symbols]
+                print(f"[Brain NLP] ⚖️ Audit Complete. AI approved {len(final_pool)} out of {len(top_candidates)} targets.")
+                return final_pool
         except Exception as e:
-            print(f"[Brain NLP] ⚠️ Validation API failed: {e}. Passing symbols blindly.")
-            return ideas
+            print(f"[Brain NLP] ❌ LLM Audit Failed: {e}. Defaulting to Quant signals.")
+            return quant_pool
 
-    def update_watchlist(self):
+    def update_watchlist(self, quant_pool):
+        if not quant_pool:
+            print("[Brain NLP] ⚠️ Quant Pool is empty. Nothing to audit.")
+            return []
+            
         news = self.fetch_latest_news()
-        raw_ideas = self.call_llm(news)
         
-        # 1. New Feature: Symbol Validation
-        ideas = self.validate_symbols(raw_ideas)
+        # AI now AUDITS the quant pool instead of generating its own
+        approved_pool = self.call_llm_auditor(news, quant_pool)
         
         data = {
             "date": datetime.now().strftime("%Y-%m-%d"),
-            "stocks": ideas
+            "stocks": approved_pool
         }
         with open(self.watchlist_file, "w") as f:
             json.dump(data, f, indent=4)
-        print(f"[Brain NLP] ✅ Watchlist updated with {len(ideas)} validated LLM-extracted targets.")
-        return ideas
+            
+        print(f"[Brain NLP] ✅ Watchlist updated. {len(approved_pool)} stocks ready for Execution Sniper.")
+        return approved_pool
 
 if __name__ == "__main__":
+    # Test with dummy data
     brain = NLPBrain()
-    brain.update_watchlist()
+    dummy_quant_pool = [{"symbol": "600519", "accumulation_score": 5}, {"symbol": "000977", "accumulation_score": 4}]
+    brain.update_watchlist(dummy_quant_pool)
