@@ -9,9 +9,9 @@ class QuantRadar:
     def __init__(self):
         self.screener = UniverseScreener()
         self.lookback_days = 10
-        self.accumulation_days_threshold = 3 # At least 3 days of high volume in the last 10 days
+        self.accumulation_days_threshold = 4 # Optimized: At least 4 days of high volume in the last 10 days
         self.max_price_spike = 0.15          # Do not buy if it already spiked > 15% in 10 days
-        self.vol_multiplier = 1.5            # High volume = 1.5x of 20-day average volume
+        self.vol_multiplier = 1.2            # Optimized: Volume = 1.2x of 20-day average volume
         
     def scan_accumulation(self, symbols=None):
         if not symbols:

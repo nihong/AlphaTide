@@ -47,7 +47,7 @@ class ExecutionEngine:
             
             if direction == "LONG":
                 # Trailing Stop Logic (LONG)
-                potential_new_stop = current_price - (atr * 2.0)
+                potential_new_stop = current_price - (atr * 1.5) # Optimized ATR multiplier
                 if potential_new_stop > data["stop_loss"]:
                     data["stop_loss"] = potential_new_stop
                     print(f"  -> 🛡️ [LONG] {sym} Trailing Stop raised to {potential_new_stop:.2f}")
@@ -64,7 +64,7 @@ class ExecutionEngine:
                         print(f"     Sold {data['shares']} shares at {current_price:.2f}. Returned {sell_value:.2f} to cash.")
             else:
                 # Trailing Stop Logic (SHORT)
-                potential_new_stop = current_price + (atr * 2.0)
+                potential_new_stop = current_price + (atr * 1.5) # Optimized ATR multiplier
                 if potential_new_stop < data["stop_loss"]:
                     data["stop_loss"] = potential_new_stop
                     print(f"  -> 🛡️ [SHORT] {sym} Trailing Stop lowered to {potential_new_stop:.2f}")
@@ -99,19 +99,23 @@ class ExecutionEngine:
         cash = state["cash"]
         positions = state["positions"]
         
-        existing_themes = [p['theme'] for p in positions.values()]
+        existing_themes = [p.get('theme', '') for p in positions.values()]
         
         # 2. Open new positions
         for target in targets:
+            if len(positions) >= 2: # Optimized: Max 2 positions for concentration
+                print(f"  -> 🛑 MAX POSITIONS (2) REACHED. Skipping further entries.")
+                break
+                
             sym = target['symbol']
-            theme = target['theme']
+            theme = target.get('theme', 'Quant')
             direction = target.get('direction', 'LONG')
             
             if sym in positions:
                 print(f"  -> ⏭️ Already holding {sym}. Skipping.")
                 continue
                 
-            if direction == "LONG" and theme in existing_themes:
+            if direction == "LONG" and theme in existing_themes and theme != 'Quant':
                 print(f"  -> 🛑 THEME CORRELATION LOCK: Already holding a stock with theme '{theme}'. Skipping {sym}.")
                 continue
                 
@@ -122,11 +126,12 @@ class ExecutionEngine:
                 
             current_price = df.iloc[-1]['收盘']
             atr = self.calculate_atr(sym)
-            stop_distance = atr * 2.0
+            stop_distance = atr * 1.5 # Optimized ATR
             
-            # Position sizing
-            capital_at_risk = (cash + sum([p["shares"]*p["entry_price"] for p in positions.values()])) * self.risk_per_trade
-            shares_to_buy = int(capital_at_risk / stop_distance)
+            # Position sizing (All in on 2 positions = 50% capital at risk per trade)
+            total_equity = cash + sum([p["shares"]*p["entry_price"] for p in positions.values()])
+            alloc = total_equity * 0.50 # 50% allocation
+            shares_to_buy = int(alloc / current_price)
             shares_to_buy = max(100, (shares_to_buy // 100) * 100)
             total_cost = shares_to_buy * current_price
             
