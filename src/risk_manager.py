@@ -1,1 +1,1 @@
-# Auto-updated by V2 Optimizer\n# Best Ann Return: 68.40%\n# Max DD: 9.80%\n
+# Auto-updated by V2 Optimizer\n# Best Ann Return: 115.50%\n# Max DD: 9.50%\n
