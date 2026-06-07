@@ -15,28 +15,27 @@ class QuantRadar:
         
     def scan_accumulation(self, symbols=None):
         if not symbols:
-            print("[Quant Radar] 📡 Fetching Core Universe...")
+            print("[Quant Radar] 📡 Fetching RPS Top 10% Core Universe...")
             symbols = self.screener.filter_universe()
             
-        print(f"\\n[Quant Radar] 🕵️ Scanning {len(symbols)} stocks for 10-day Institutional Accumulation...")
+        print(f"\\n[Quant Radar] 🕵️ Scanning {len(symbols)} stocks for Volatility Contraction (VCP) & Breakout...")
         
         end_date = datetime.now()
         start_date = end_date - timedelta(days=60) # Need 60 days to calc MA20 properly
         start_str = start_date.strftime("%Y%m%d")
         end_str = end_date.strftime("%Y%m%d")
         
-        accumulation_pool = []
+        vcp_pool = []
         
         # In a real production system, this would be heavily concurrent/async.
-        # For demonstration, we will scan the first 100 to save API time if the list is huge.
         scan_list = symbols[:150] if len(symbols) > 150 else symbols
         
         for idx, code in enumerate(scan_list):
             if idx % 20 == 0:
                 print(f"  -> Scanning progress: {idx}/{len(scan_list)}...")
                 
-            if code.startswith("6") or code.startswith("5"): prefix = "sh" + code
-            elif code.startswith("0") or code.startswith("3") or code.startswith("1"): prefix = "sz" + code
+            if code.startswith("6") or code.startswith("5") or code.startswith("1"): prefix = "sh" + code
+            elif code.startswith("0") or code.startswith("3"): prefix = "sz" + code
             else: continue
             
             try:
@@ -46,43 +45,54 @@ class QuantRadar:
                 
                 # Calculate indicators
                 df['ma20'] = df['close'].rolling(20).mean()
+                df['ma60'] = df['close'].rolling(60).mean()
                 df['vol_ma20'] = df['volume'].rolling(20).mean()
                 
-                # Get the last 10 days
-                last_10 = df.tail(self.lookback_days)
-                if len(last_10) < self.lookback_days: continue
+                # We need the last 15 days to check VCP
+                last_15 = df.tail(15)
+                if len(last_15) < 15: continue
                 
-                # 1. Volume Accumulation Check
-                # How many days had volume > 1.5 * vol_ma20?
-                high_vol_days = len(last_10[last_10['volume'] > last_10['vol_ma20'] * self.vol_multiplier])
+                # 1. 趋势过滤 (Trend Filter): 必须在 20 日均线之上
+                current_close = last_15.iloc[-1]['close']
+                if current_close < last_15.iloc[-1]['ma20']: continue
                 
-                if high_vol_days >= self.accumulation_days_threshold:
-                    # 2. Price Constraint Check (Avoid buying the top)
-                    price_start = last_10.iloc[0]['close']
-                    price_end = last_10.iloc[-1]['close']
-                    price_change = (price_end - price_start) / price_start
-                    
-                    # Ensure it's in a general uptrend (> MA20) but hasn't exploded yet (< 15%)
-                    if 0 < price_change < self.max_price_spike and price_end > last_10.iloc[-1]['ma20']:
-                        
-                        # Sector Resonance Placeholder: In real life, we'd map code to sector here
-                        accumulation_pool.append({
-                            "symbol": code,
-                            "accumulation_score": high_vol_days,
-                            "10d_price_change": round(price_change, 3)
-                        })
+                # 2. 价格波动率收缩 (Price Contraction)
+                # 计算倒数第 15 天到倒数第 2 天的收盘价标准差，越小代表洗盘越彻底
+                consolidation_period = last_15.iloc[0:-1]
+                price_std = consolidation_period['close'].std()
+                price_mean = consolidation_period['close'].mean()
+                volatility_ratio = price_std / price_mean
+                
+                # 3. 缩量洗盘 (Volume Dry-up)
+                # 盘整期的平均成交量必须低于 20 日均量
+                avg_consolidation_vol = consolidation_period['volume'].mean()
+                is_volume_dry = avg_consolidation_vol < consolidation_period.iloc[-1]['vol_ma20']
+                
+                # 4. 突破确认 (Breakout)
+                # 最后一根 K 线必须是阳线 (收盘 > 开盘)，且温和放量 (大于 20 日均量 1.5 倍)
+                latest_candle = last_15.iloc[-1]
+                is_green_candle = latest_candle['close'] > latest_candle['open']
+                is_breakout_vol = latest_candle['volume'] > (latest_candle['vol_ma20'] * 1.5)
+                
+                # 综合判断 VCP
+                # volatility_ratio < 0.05 意味着过去两周上下振幅极小 (死寂)
+                if volatility_ratio < 0.05 and is_volume_dry and is_green_candle and is_breakout_vol:
+                    vcp_pool.append({
+                        "symbol": code,
+                        "vcp_score": round((0.05 - volatility_ratio) * 1000, 2), # 波动率越小，得分越高
+                        "breakout_price": current_close
+                    })
             except Exception as e:
-                # Silently skip API errors for individual stocks
                 pass
                 
-        # Sort by accumulation score (number of high volume days)
-        accumulation_pool.sort(key=lambda x: x['accumulation_score'], reverse=True)
+        # Sort by VCP tightness score
+        vcp_pool.sort(key=lambda x: x['vcp_score'], reverse=True)
         
-        print(f"\\n✅ [Quant Radar] Scan complete! Found {len(accumulation_pool)} stocks under stealth accumulation.")
-        for p in accumulation_pool[:5]:
-            print(f"  🎯 Symbol {p['symbol']} | High Vol Days: {p['accumulation_score']} | 10d Change: {p['10d_price_change']*100:.1f}%")
+        print(f"\\n✅ [Quant Radar] Scan complete! Found {len(vcp_pool)} stocks triggering VCP Breakout.")
+        for p in vcp_pool[:5]:
+            print(f"  🎯 Symbol {p['symbol']} | Tightness Score: {p['vcp_score']} | Breakout Price: {p['breakout_price']}")
             
-        return accumulation_pool
+        return vcp_pool
 
 if __name__ == "__main__":
     radar = QuantRadar()

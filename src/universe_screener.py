@@ -35,14 +35,30 @@ class UniverseScreener:
         # 规则 D: 剔除长期停牌 (成交量为 0 的股票)
         df_clean = df_clean[df_clean['成交量'] > 0]
         
+        # 规则 E: RPS 相对强度过滤 (只买全市场前 10% 的最强王者)
+        # 获取涨跌幅数据 (如果是真实运行，使用 60 日或年初至今涨跌幅)
+        # 东财接口通常包含 '年初至今涨跌幅' 或 '涨跌幅'
+        momentum_col = '年初至今涨跌幅' if '年初至今涨跌幅' in df_clean.columns else '涨跌幅'
+        
+        if momentum_col in df_clean.columns:
+            # 过滤掉没有涨跌幅数据的股票
+            df_clean = df_clean.dropna(subset=[momentum_col])
+            # 计算 RPS 排名 (0-100)
+            df_clean['RPS'] = df_clean[momentum_col].rank(pct=True) * 100
+            # 只保留 RPS 大于 90 的股票 (前 10%)
+            df_clean = df_clean[df_clean['RPS'] >= 90]
+            print(f"🌟 启用 RPS 相对强度过滤: 保留 {momentum_col} 排名前 10% 的强势股。")
+        else:
+            print("⚠️ 警告: 无法获取涨跌幅字段，跳过 RPS 过滤。")
+        
         final_count = len(df_clean)
         
         # 提取保留下来的股票代码列表
         clean_symbols = df_clean['代码'].tolist()
         
         print(f"✅ 清洗完毕！")
-        print(f"🚫 剔除了 {initial_count - final_count} 只垃圾股/僵尸股/微盘股")
-        print(f"💎 剩余核心高流动性标的: {final_count} 只")
+        print(f"🚫 剔除了 {initial_count - final_count} 只弱势股/垃圾股")
+        print(f"💎 剩余 RPS Top10% 核心标的: {final_count} 只")
         
         return clean_symbols
 

@@ -101,7 +101,22 @@ class ExecutionEngine:
         
         existing_themes = [p.get('theme', '') for p in positions.values()]
         
-        # 2. Open new positions
+        # 2. Macro Weather Forecast (Trend Filter)
+        # Check if broad market is in a downtrend. If so, we don't open new LONG positions.
+        macro_is_bullish = True
+        try:
+            # Fetching CSI 300 ETF as proxy for broad market (sh510300)
+            df_macro = self.price_fetcher.fetch_stock_data_with_retry('sh510300', retries=2)
+            if not df_macro.empty and len(df_macro) >= 60:
+                macro_close = df_macro.iloc[-1]['收盘']
+                macro_ma60 = df_macro['收盘'].rolling(60).mean().iloc[-1]
+                if macro_close < macro_ma60:
+                    macro_is_bullish = False
+                    print(f"  -> ⛈️ MACRO WEATHER WARNING: CSI 300 is below 60-day MA (Bear Market). Refusing new LONG entries.")
+        except Exception as e:
+            print("  -> ⚠️ Could not fetch macro index. Defaulting to bullish.")
+            
+        # 3. Open new positions
         for target in targets:
             if len(positions) >= 2: # Optimized: Max 2 positions for concentration
                 print(f"  -> 🛑 MAX POSITIONS (2) REACHED. Skipping further entries.")
@@ -110,6 +125,10 @@ class ExecutionEngine:
             sym = target['symbol']
             theme = target.get('theme', 'Quant')
             direction = target.get('direction', 'LONG')
+            
+            if direction == "LONG" and not macro_is_bullish:
+                print(f"  -> 🛑 WEATHER LOCK: Skipping LONG entry for {sym} due to Bear Market conditions.")
+                continue
             
             if sym in positions:
                 print(f"  -> ⏭️ Already holding {sym}. Skipping.")
