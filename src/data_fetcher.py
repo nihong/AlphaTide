@@ -1,6 +1,4 @@
 import os
-os.environ['NO_PROXY'] = '*'
-
 import akshare as ak
 import pandas as pd
 
@@ -33,9 +31,6 @@ def fetch_with_cache(cache_key, fetch_func, expiry_hours=24, **kwargs):
 
     # 极速模式：新浪和腾讯极少封锁，将停顿缩减到极小的象征性防刷即可
     time.sleep(0.1)
-    
-    # 强制设置代理环境变量（国内数据建议直连）
-    os.environ["NO_PROXY"] = "*"
     
     try:
         data = fetch_func(**kwargs)

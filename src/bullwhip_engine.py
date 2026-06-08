@@ -23,7 +23,6 @@ class BullwhipEngine:
         self.ai = AIAnalyst()
         self.rps_threshold = 85
         self.atr_stop_multiplier = 2.5
-        os.environ["NO_PROXY"] = "*"
 
     def scan_spot_commodities(self) -> List[str]:
         """
