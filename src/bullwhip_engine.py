@@ -176,19 +176,47 @@ class BullwhipEngine:
             logger.warning(f"⚠️ 回购数据 API 抓取失败: {e}")
             return []
 
+    def scan_alternative_bidding_and_hiring(self, symbol: str) -> dict:
+        """
+        [特早雷达 V8.0：另类高频佐证 2 & 3] - 招投标与招聘激增监控
+        逻辑：通过抓取个股近期的碎片化新闻与公告，利用 NLP 关键词提取【中标/采购】与【扩产/急招】信号。
+        """
+        logger.info(f"🕸️ [Super Early Radar] 正在对 {symbol} 提取【招投标】与【招聘】另类蛛丝马迹...")
+        signals = {"has_bidding": False, "has_hiring": False}
+        try:
+            news_df = ak.stock_news_em(symbol=symbol)
+            if not news_df.empty and '新闻内容' in news_df.columns:
+                # 检查最近 20 条新闻的内容
+                recent_news = " ".join(news_df['新闻内容'].head(20).astype(str).tolist())
+                
+                # 招投标关键词集
+                if any(k in recent_news for k in ['中标', '采购', '大单', '订购', '供应商定点']):
+                    signals["has_bidding"] = True
+                    
+                # 招聘与满产关键词集
+                if any(k in recent_news for k in ['急招', '扩产', '满产', '加码', '招工', '三班倒']):
+                    signals["has_hiring"] = True
+        except Exception as e:
+            logger.debug(f"另类数据提取失败: {e}")
+            
+        return signals
+
     def verify_leading_financials(self, symbol: str) -> bool:
         """
         [特早雷达 V8.0：底层财务先导指标] - 寻找【缩表 (CapEx枯竭) + 爆单 (合同负债飙升)】组合
-        这是比现货价格更早期的“供需断层”温床。
         """
         logger.info(f"🔬 [Super Early Radar] 正在对 {symbol} 进行【资本开支枯竭 + 合同负债暗涌】极早期财务穿透...")
-        # 此处在实盘中会调用 ak.stock_balance_sheet_by_report_em 提取【合同负债】
-        # 并调用 ak.stock_cash_flow_sheet_by_report_em 提取【购建固定资产支付的现金】
-        # 为防止单机遍历 5000 股导致网络被封，此逻辑设计为【定点爆破】模式：只对嫌疑标的进行穿透。
         
+        # 1. 调用另类数据印证（招投标 + 招聘）
+        alt_data = self.scan_alternative_bidding_and_hiring(symbol)
+        if alt_data["has_bidding"] or alt_data["has_hiring"]:
+            logger.info(f"🎯 [命中先导信号] {symbol} 在碎片化数据中发现: 招投标爆单={alt_data['has_bidding']}, 招工/扩产={alt_data['has_hiring']}")
+        else:
+            logger.info(f"📭 [平静期] {symbol} 暂未捕捉到另类招工或中标异动。")
+
         # （模拟定点穿透财务底牌的严苛判断逻辑）
-        # 1. 检查过去 3 年的 CapEx 均值是否较最高峰下降了 50% 以上（供给侧彻底出清）
-        # 2. 检查最近一个季度的合同负债/预收款项是否环比暴增了 30% 以上（需求端大厂排队塞钱）
+        # 2. 检查过去 3 年的 CapEx 均值是否较最高峰下降了 50% 以上（供给侧彻底出清）
+        # 3. 检查最近一个季度的合同负债/预收款项是否环比暴增了 30% 以上（需求端大厂排队塞钱）
         
         # 暂时返回 True 允许引擎继续，待接入机构付费端后激活硬核审计。
         return True
