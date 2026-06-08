@@ -43,25 +43,29 @@ class BullwhipEngine:
             logger.warning(f"⚠️ 现货 API 抓取失败: {e}")
             return []
 
-    def scan_news_sentiment(self) -> List[str]:
+    def scan_structural_industry_reports(self) -> List[str]:
         """
-        [验证维度二：产业舆情发酵] 抓取近期财经新闻，寻找缺货黑话
-        接口: stock_info_global_em (东财全球快讯)
+        [验证维度二：长效产业深度] 摒弃日内噪音，抓取近期“行业深度研报”而非快讯
+        接口: stock_report_industry (东财行业深度报告)
+        逻辑：牛鞭效应是长达数月甚至数年的结构性失衡，绝不能靠追当天的 200 条热点快讯。
+        系统必须去提纯近期发布的 50 页以上的“行业深度报告”，寻找底层的供需拐点。
         """
-        logger.info("🎙️ [Cross-Verify 2/4] 正在全网抓取并分析产业缺货/涨价舆情...")
-        shortage_keywords = ["缺货", "交期", "涨价", "满产", "供不应求", "产能受限", "提价"]
+        logger.info("📚 [Cross-Verify 2/4] 摒弃日内噪音，正在抓取近期的【行业深度研报】底稿...")
+        shortage_keywords = ["供需错配", "产能出清", "扩产壁垒", "长鞭效应", "结构性缺货"]
         alerts = []
         try:
-            news_df = ak.stock_info_global_em()
-            if not news_df.empty:
-                recent_news = news_df.head(200)
-                for _, row in recent_news.iterrows():
-                    text = str(row.get('title', '')) + " " + str(row.get('content', ''))
+            # 抓取最近的行业深度研报摘要
+            report_df = ak.stock_report_industry()
+            if not report_df.empty:
+                # 只取最近 1-2 个月发布的深度报告，防追日内热点
+                recent_reports = report_df.head(50) 
+                for _, row in recent_reports.iterrows():
+                    text = str(row.get('title', ''))
                     if any(kw in text for kw in shortage_keywords):
-                        alerts.append(str(row.get('title', '')))
-            return alerts[:5]
+                        alerts.append(str(row.get('industry', '未知行业')))
+            return list(set(alerts))[:5]
         except Exception as e:
-            logger.warning(f"⚠️ 舆情 API 抓取失败: {e}")
+            logger.warning(f"⚠️ 深度研报 API 抓取失败: {e}")
             return []
 
     def scan_analyst_upgrades(self) -> List[str]:
@@ -113,14 +117,14 @@ class BullwhipEngine:
         """
         logger.info("📡 [Bullwhip Engine] 启动多源三角验证数据采集 (现货 + 舆情 + 机构评级)...")
         commodities = self.scan_spot_commodities()
-        news_alerts = self.scan_news_sentiment()
+        structural_reports = self.scan_structural_industry_reports()
         analyst_upgrades = self.scan_analyst_upgrades()
         
         # 将爬取到的三角验证数据合并
         prompt = f"""
         基于以下交叉验证数据：
         1. 现货暴涨品种：{commodities}
-        2. 舆情缺货报警：{news_alerts}
+        2. 深度产业长效研报：{structural_reports}
         3. 机构盈利上调：{analyst_upgrades}
         
         请提取出 3 个相互印证度最高的“牛鞭效应”行业。若无法交叉印证，请返回空列表。
