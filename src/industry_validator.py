@@ -66,7 +66,10 @@ class IndustryValidator:
                 "rcode": "", "p": "1", "pageNum": "1", "pageNumber": "1",
             }
             try:
-                r = requests.get(url, params=params)
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+                }
+                r = requests.get(url, params=params, headers=headers, timeout=10)
                 data = r.json()
                 if data and "data" in data and data["data"]:
                     for item in data["data"]:
@@ -90,8 +93,14 @@ class IndustryValidator:
                             'rating': item.get('emRatingName', '')
                         })
                         self.parsed_reports.add(cache_key)
+                else:
+                    raise ValueError("API response structural change detected or Empty data.")
             except Exception as e:
-                print(f"获取全市场研报失败: {e}")
+                print(f"⚠️ [警告] 极速全市场研报 API 抓取失败或被封禁 ({e})。")
+                print("🔄 [容灾机制] 正在自动降级为使用 Akshare 稳定版逐个扫描核心底池...")
+                # Fallback to scanning a dynamic/core list of symbols using the stable library
+                fallback_symbols = get_dynamic_hot_symbols() if callable(get_dynamic_hot_symbols) else ["sh600519", "sz000858", "sz300750", "sh601899", "sh601088", "sz000333", "sh600900", "sz002475"]
+                return self.scan_broker_reports(target_symbols=fallback_symbols, target_date=target_date)
         else:
             print(f"🔍 正在拉取雷达锁定标的的研报 ({len(target_symbols)}只核心龙头)...")
             for sym in target_symbols:
