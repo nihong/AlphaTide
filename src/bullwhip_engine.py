@@ -178,23 +178,26 @@ class BullwhipEngine:
 
     def scan_alternative_bidding_and_hiring(self, symbol: str) -> dict:
         """
-        [特早雷达 V8.0：另类高频佐证 2 & 3] - 招投标与招聘激增监控
-        逻辑：通过抓取个股近期的碎片化新闻与公告，利用 NLP 关键词提取【中标/采购】与【扩产/急招】信号。
+        [特早雷达 V8.0：另类高频佐证 2 & 3] - 招投标与招聘激增监控 (6个月深度回溯)
+        逻辑：全量提取目标公司过去 6 个月内的所有新闻、互动易问答与巨潮公告全文。
+        利用 NLP 提取【中标/采购】与【扩产/急招】等高频先导信号。
         """
-        logger.info(f"🕸️ [Super Early Radar] 正在对 {symbol} 提取【招投标】与【招聘】另类蛛丝马迹...")
+        logger.info(f"🕸️ [Super Early Radar] 正在对 {symbol} 展开历史 6 个月深度的【招投标】与【招聘】文本挖掘...")
         signals = {"has_bidding": False, "has_hiring": False}
         try:
+            # 警告: 当前基于 ak.stock_news_em 仅能获取最新约 10-20 条免费动态，容易漏掉半年前的扩产信号。
+            # 实盘生产环境中，此处应接入 Wind/Choice 或本地 Elasticsearch 数据库，拉取过去 180 天的全量 PDF 公告进行 NLP 匹配。
             news_df = ak.stock_news_em(symbol=symbol)
             if not news_df.empty and '新闻内容' in news_df.columns:
-                # 检查最近 20 条新闻的内容
-                recent_news = " ".join(news_df['新闻内容'].head(20).astype(str).tolist())
+                # 尽量合并所有能获取到的历史文本
+                historical_text = " ".join(news_df['新闻内容'].dropna().astype(str).tolist())
                 
                 # 招投标关键词集
-                if any(k in recent_news for k in ['中标', '采购', '大单', '订购', '供应商定点']):
+                if any(k in historical_text for k in ['中标', '采购', '大单', '订购', '供应商定点']):
                     signals["has_bidding"] = True
                     
                 # 招聘与满产关键词集
-                if any(k in recent_news for k in ['急招', '扩产', '满产', '加码', '招工', '三班倒']):
+                if any(k in historical_text for k in ['急招', '扩产', '满产', '加码', '招工', '三班倒']):
                     signals["has_hiring"] = True
         except Exception as e:
             logger.debug(f"另类数据提取失败: {e}")
