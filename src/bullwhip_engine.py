@@ -63,7 +63,8 @@ class BullwhipEngine:
         for source in sources:
             try:
                 if source == 'eastmoney':
-                    report_df = ak.stock_report_industry()
+                    # 修正: akshare 最新版本行业深度报告接口为 stock_research_report_em (或调用 industry 行业研报参数)
+                    report_df = ak.stock_research_report_em()
                 if not report_df.empty:
                     break 
             except Exception as e:
