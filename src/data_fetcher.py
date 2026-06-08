@@ -70,6 +70,12 @@ def fetch_a_stock_hist(symbol: str, period: str = "daily", start_date: str = "19
     随机打乱 [东方财富, 新浪, 腾讯] 的请求顺序。
     这样每个数据源只承担 33% 的并发压力，极大降低被单一平台封禁的概率。
     """
+    
+    # 强制清理 symbol 的 sh/sz 前缀，防止传错格式导致三大 API 崩溃
+    symbol = str(symbol).lower()
+    if symbol.startswith("sh") or symbol.startswith("sz"):
+        symbol = symbol[2:]
+        
     # 针对 ETF 基金 (如 510300) 的特殊处理
     if symbol.startswith('51') or symbol.startswith('15'):
         try:
