@@ -41,3 +41,4 @@
 
 ## 👨‍💻 AI 开发者行为准则 (Developer Rules)
 *   **Git 提交规范**：**所有 Git 提交记录（Commit Message）必须强制使用全中文描述**（例如：`git commit -m "特性: 增加多源验证机制"`），严禁使用英文描述，以确保团队查阅的历史记录完全无语言障碍。
+*   **战报生成绝对纪律 (Report Generation Policy)**：任何 AI 在生成个股分析战报或实盘跑批总结时，**严禁自行发挥排版**！必须首先读取 `reports/REPORT_TEMPLATE.md` 文件，严格按照其设定的五大模块结构与 `YYYYMMDD_行业_公司_代码.md` 命名规范生成。这是不可逾越的红线！
