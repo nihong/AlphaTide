@@ -47,14 +47,17 @@ class BullwhipEngine:
         """
         [验证维度二：长效产业深度] 
         1. 多源备份：优先东财，若失败切换至新浪/同花顺深度研报库。
-        2. 时效控制：严格过滤出过去 30-90 天内的报告（规避昨日噪音与半年前失效数据）。
-        3. 两段式漏斗：本地代码初筛关键词 -> 提纯后送入大模型精读。
+        2. 机构白名单过滤：只读【中金、中信、华泰、广发】等历史胜率高、公信力极强的研报，剔除野鸡券商研报。
+        3. 时效控制：严格过滤出过去 30-90 天内的报告（规避昨日噪音与半年前失效数据）。
+        4. 两段式漏斗：本地代码初筛关键词 -> 提纯后送入大模型精读。
         """
-        logger.info("📚 [Cross-Verify 2/4] 启动两段式漏斗，抓取近 1-3 个月的【行业深度研报】底稿...")
+        logger.info("📚 [Cross-Verify 2/4] 启动两段式漏斗与【白名单过滤】，抓取顶级机构深度底稿...")
         shortage_keywords = ["供需错配", "产能出清", "扩产壁垒", "长鞭效应", "结构性缺货", "资本开支见底"]
-        alerts = []
         
-        # 模拟多数据源负载均衡 (EastMoney -> Sina)
+        # 顶级权威机构白名单 (防止被野鸡研报和付费吹票误导)
+        top_tier_institutions = ["中金公司", "中信证券", "华泰证券", "广发证券", "招商证券", "国泰君安", "海通证券", "天风证券"]
+        
+        alerts = []
         sources = ['eastmoney', 'sina']
         report_df = pd.DataFrame()
         
@@ -62,9 +65,8 @@ class BullwhipEngine:
             try:
                 if source == 'eastmoney':
                     report_df = ak.stock_report_industry()
-                # 实际开发中可加入 ak.stock_report_fund() 等其他库作为备份
                 if not report_df.empty:
-                    break # 成功抓取则跳出备用源轮询
+                    break 
             except Exception as e:
                 logger.warning(f"⚠️ {source} 研报 API 抓取失败，尝试备用源... ({e})")
                 continue
@@ -73,25 +75,29 @@ class BullwhipEngine:
             return []
 
         try:
-            # 第一阶段：时间过滤 (提纯过去 90 天，剔除最近 3 天的脉冲噪音)
-            # 由于部分 akshare 接口返回无确切 date，这里做安全提取，如果有 date 列则执行
+            # 过滤1：时间窗过滤
             if '日期' in report_df.columns:
                 report_df['日期'] = pd.to_datetime(report_df['日期'])
                 now = pd.Timestamp.now()
-                # 取 3天前 到 90天前 的深度报告
                 mask = (report_df['日期'] <= now - pd.Timedelta(days=3)) & (report_df['日期'] >= now - pd.Timedelta(days=90))
                 filtered_df = report_df[mask]
             else:
-                filtered_df = report_df.head(150) # 无时间戳则取前150篇
+                filtered_df = report_df.head(200)
 
-            # 第二阶段：本地 NLP 初筛 (零 API 成本)
+            # 过滤2：机构白名单与本地关键词初筛
             target_reports = []
             for _, row in filtered_df.iterrows():
+                # 获取机构名称 (不同API字段名可能不同，做兼容处理)
+                org_name = str(row.get('机构名称', row.get('org_name', row.get('org_sname', '未知'))))
+                
+                # 如果明确有机构列，但不在白名单内，直接抛弃 (Garbage In, Garbage Out)
+                if org_name != '未知' and not any(tier in org_name for tier in top_tier_institutions):
+                    continue
+                    
                 text = str(row.get('title', '')) + " " + str(row.get('industry', ''))
                 if any(kw in text for kw in shortage_keywords):
                     target_reports.append(str(row.get('industry', '未知行业')))
             
-            # 第三阶段：仅将命中关键词的极少数报告抛给大模型精读 (此步骤在主函数综合处执行)
             return list(set(target_reports))[:5]
         except Exception as e:
             logger.warning(f"⚠️ 深度研报过滤失败: {e}")
