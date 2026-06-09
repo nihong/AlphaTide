@@ -1,48 +1,88 @@
 import os
-import requests
 import json
 import re
+import asyncio
+
+try:
+    from google.antigravity import Agent, LocalAgentConfig
+except ImportError:
+    pass
+
+import pydantic
+
+class TargetStock(pydantic.BaseModel):
+    symbol: str
+    name: str
+    reason: str
+
+class TargetList(pydantic.BaseModel):
+    targets: list[TargetStock]
 
 class AIAnalyst:
     def __init__(self):
-        self.api_key = os.getenv("DEEPSEEK_API_KEY")
-        self.base_url = "https://api.deepseek.com"
+        pass
 
     def analyze_with_llm(self, prompt):
-        """调用 DeepSeek API 进行深度分析"""
-        if not self.api_key:
-            return "⚠️ 未配置 DEEPSEEK_API_KEY，请在环境变量中设置。报告将仅包含原始 Prompt。"
+        """调用 AI 模型进行深度分析 (Antigravity SDK)"""
+        return asyncio.run(self._async_analyze_with_llm(prompt))
 
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+    def map_sectors_to_symbols(self, sectors, universe):
+        """利用大模型将瓶颈行业映射到具体的 A 股龙头标的"""
+        return asyncio.run(self._async_map_sectors_to_symbols(sectors, universe))
+
+    async def _async_analyze_with_llm(self, prompt):
+        system_instruction = (
+            "你是一位专业的量化投资分析师，专门针对'牛鞭效应'和'供应链瓶颈'生成战报。\n"
+            "【最高指令：反作弊机制 (ANTI-HALLUCINATION PROTOCOL)】\n"
+            "1. 绝对禁止捏造、凭空生成任何具体的现货价格、毛利率数据、或是大厂电话会的原句。\n"
+            "2. 如果上下文没有提供真实数据，必须输出 'DATA_UNAVAILABLE' 或 '无公开数据支撑'，绝不允许编造数字。\n"
+            "3. 绝对禁止生成虚拟的 URL 链接（如 mock-url）。所有引用的链接必须来源于系统传入的真实 Grounding 库。\n"
+            "4. 所有的结论必须具有可追溯的逻辑源头。"
+        )
         
-        payload = {
-            "model": "deepseek-chat",
-            "messages": [
-                {
-                    "role": "system", 
-                    "content": "你是一位专业的量化投资分析师，专门针对'牛鞭效应'和'供应链瓶颈'生成战报。\n"
-                               "【最高指令：反作弊机制 (ANTI-HALLUCINATION PROTOCOL)】\n"
-                               "1. 绝对禁止捏造、凭空生成任何具体的现货价格、毛利率数据、或是大厂电话会的原句。\n"
-                               "2. 如果上下文没有提供真实数据，必须输出 'DATA_UNAVAILABLE' 或 '无公开数据支撑'，绝不允许编造数字。\n"
-                               "3. 绝对禁止生成虚拟的 URL 链接（如 mock-url）。所有引用的链接必须来源于系统传入的真实 Grounding 库。\n"
-                               "4. 所有的结论必须具有可追溯的逻辑源头。"
-                },
-                {"role": "user", "content": prompt}
-            ],
-            "stream": False
-        }
-
+        config = LocalAgentConfig(
+            system_instruction=system_instruction
+        )
         try:
-            response = requests.post(f"{self.base_url}/chat/completions", json=payload, headers=headers)
-            if response.status_code == 200:
-                return response.json()['choices'][0]['message']['content']
-            else:
-                return f"❌ API 调用失败: {response.text}"
+            async with Agent(config) as agent:
+                response = await agent.chat(prompt)
+                return await response.text()
         except Exception as e:
             return f"❌ AI 分析发生错误: {e}"
+
+    async def _async_map_sectors_to_symbols(self, sectors, universe):
+        system_instruction = (
+            "你是一位资深的A股行业研究员。你需要根据给定的目标赛道（如缺货涨价的细分行业），"
+            "从给定的强势股票池中，挑选出最符合这些赛道的龙头公司。"
+        )
+        
+        config = LocalAgentConfig(
+            system_instruction=system_instruction,
+            response_schema=TargetList
+        )
+        
+        # 限制传入的股票池数量，避免超过 token 限制
+        # 如果池子太大，可以只传前 200 个，这里假设 universe 已经清洗过了
+        universe_str = "\n".join([f"{item['代码']}: {item['名称']}" for item in universe[:300]])
+        
+        prompt = (
+            f"以下是当前市场经过量价清洗后的强势股票池（前300只）：\n"
+            f"{universe_str}\n\n"
+            f"目标赛道（牛鞭效应/供应链瓶颈）：{sectors}\n\n"
+            f"请从上述股票池中，挑选出属于这些目标赛道的公司。如果不存在符合条件的，请返回空列表。\n"
+            f"请简述选择该公司的核心理由（例如它在该赛道的核心产品或地位）。"
+        )
+        
+        try:
+            async with Agent(config) as agent:
+                response = await agent.chat(prompt)
+                data = await response.structured_output()
+                if data:
+                    return [item['symbol'] for item in data['targets']]
+                return []
+        except Exception as e:
+            print(f"❌ AI 赛道映射发生错误: {e}")
+            return []
 
     def generate_v7_report_prompt(self, symbol, sector, raw_macro_data, raw_financial_data):
         """

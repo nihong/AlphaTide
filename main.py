@@ -92,8 +92,24 @@ def run_bullwhip_pipeline():
 
     # 第三步：在赛道中寻找“第一基底龙头”
     logger.info("正在执行 V8.0 第三步：在目标赛道中锁定量价与财务共振的绝对龙头...")
-    # 系统根据赛道自动映射 A 股标的 (此处为映射后的代码，包含被动元件与液冷)
-    target_symbols = ["sz300408", "sz000636", "sz002837"] # 三环集团, 风华高科, 英维克
+    
+    # 3.1 获取全市场强势股底池 (RPS > 90)
+    screener = UniverseScreener()
+    core_universe = screener.filter_universe()
+    
+    if not core_universe:
+        logger.warning("🛑 当前市场极度恶劣，无任何满足 RPS 强势条件的股票，空仓等待。")
+        return
+
+    # 3.2 使用 AI 将牛鞭效应赛道映射到具体的 A 股强势标的
+    logger.info("🤖 正在调用 Antigravity AI 映射核心标的...")
+    target_symbols = bullwhip.ai.map_sectors_to_symbols(bottleneck_sectors, core_universe)
+    
+    if not target_symbols:
+        logger.warning("🛑 强势股池中未发现符合牛鞭效应赛道的公司。绝不将就！")
+        return
+        
+    logger.info(f"🎯 AI 成功映射赛道核心标的: {target_symbols}")
     
     apex_predators = bullwhip.screen_apex_predators(target_symbols)
     

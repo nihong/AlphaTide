@@ -53,8 +53,8 @@ class UniverseScreener:
         
         final_count = len(df_clean)
         
-        # 提取保留下来的股票代码列表
-        clean_symbols = df_clean['代码'].tolist()
+        # 提取保留下来的股票代码和名称列表
+        clean_symbols = df_clean[['代码', '名称']].to_dict('records')
         
         print(f"✅ 清洗完毕！")
         print(f"🚫 剔除了 {initial_count - final_count} 只弱势股/垃圾股")
