@@ -42,7 +42,7 @@ def run_performance_backtest():
     for symbol, name in symbols.items():
         print(f"正在模拟交易计算: {name} ({symbol}) ...")
         try:
-            df = ak.stock_zh_a_hist_tx(symbol=symbol, start_date="20200101", end_date="20260609", adjust="qfq")
+            df = ak.stock_zh_a_hist_tx(symbol=symbol, start_date="20230601", end_date="20260609", adjust="qfq")
         except Exception as e:
             print(f"获取 {name} 数据失败: {e}")
             continue
@@ -98,6 +98,11 @@ def run_performance_backtest():
         return
         
     trades_df = pd.DataFrame(all_trades)
+    
+    print("\n📜 过去三年具体买卖指令流水日志:")
+    for _, trade in trades_df.iterrows():
+        print(f"[{trade['stock']}] 买入: {trade['entry_date'].date()} -> 卖出: {trade['exit_date'].date()} | 盈亏: {trade['profit_pct']:.2f}%")
+        
     total_trades = len(trades_df)
     win_trades = len(trades_df[trades_df['profit_pct'] > 0])
     win_rate = win_trades / total_trades * 100
@@ -121,7 +126,7 @@ def run_performance_backtest():
     drawdowns = (capital_series - rolling_max) / rolling_max * 100
     max_drawdown = drawdowns.min()
     
-    print("\n📊 核心龙头组合 6 年量化回测报告 (2020 - 2026)")
+    print("\n📊 核心龙头组合 3 年量化回测报告 (2023.6 - 2026.6)")
     print("-" * 50)
     print(f"🔹 初始本金: 1,000,000 元")
     print(f"🔹 最终本金: {capital:,.2f} 元")
