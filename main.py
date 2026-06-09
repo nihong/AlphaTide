@@ -1,5 +1,11 @@
 import sys
 import os
+
+# 彻底屏蔽 Mac 系统级代理与终端环境变量代理，实现“局部直连”
+os.environ['NO_PROXY'] = '*'
+for proxy_var in ['http_proxy', 'https_proxy', 'all_proxy', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY']:
+    os.environ.pop(proxy_var, None)
+
 import logging
 from datetime import datetime
 
