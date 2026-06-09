@@ -265,7 +265,7 @@ class BullwhipEngine:
             
         return list(set(ai_sectors + commodities))
 
-    def screen_apex_predators(self, symbols: List[str], target_date: str = None) -> List[Dict]:
+    def screen_apex_predators(self, target_list: List[Dict], target_date: str = None) -> List[Dict]:
         """
         全自动真实量价第一基底扫描 + 财务真伪核验 (支持并发架构提升效率)
         """
@@ -274,8 +274,12 @@ class BullwhipEngine:
         
         import concurrent.futures
 
-        def process_symbol(sym):
+        def process_symbol(target):
             try:
+                sym = target.get('symbol', target) if isinstance(target, dict) else target
+                name = target.get('name', '未知') if isinstance(target, dict) else '未知'
+                ai_reason = target.get('reason', '') if isinstance(target, dict) else ''
+                
                 df = fetch_a_stock_hist_cached(sym, period="daily")
                 if df is None or df.empty or len(df) < 100: return None
                 
@@ -299,22 +303,24 @@ class BullwhipEngine:
                 is_leading_solid = self.verify_leading_financials(sym)
                 
                 if not (is_financial_solid and is_leading_solid):
-                    logger.info(f"🚫 {sym} 财务印证或极早期先导指标未通过，拒绝列为龙头。")
+                    logger.info(f"🚫 {sym} ({name}) 财务印证或极早期先导指标未通过，拒绝列为龙头。")
                     return None
                     
                 return {
                     "symbol": sym,
+                    "name": name,
+                    "ai_reason": ai_reason,
                     "current_price": current_price,
                     "momentum": round(momentum_20d * 100, 2),
                     "vcp_status": "Stage 2 First Base (VCP Tight)",
                     "reason": "V8.0 特早雷达通过: 现货/研报/财务/缩表/量价全部共振"
                 }
             except Exception as e:
-                logger.debug(f"标的 {sym} 计算失败: {e}")
+                logger.debug(f"标的计算失败: {e}")
                 return None
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            results = executor.map(process_symbol, symbols)
+            results = executor.map(process_symbol, target_list)
             
         for res in results:
             if res:

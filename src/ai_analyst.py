@@ -100,7 +100,7 @@ class AIAnalyst:
                 response = await agent.chat(prompt)
                 data = await response.structured_output()
                 if data:
-                    return [item['symbol'] for item in data['targets']]
+                    return [item.model_dump() if hasattr(item, 'model_dump') else (item.dict() if hasattr(item, 'dict') else item) for item in data['targets']]
                 return []
         except Exception as e:
             print(f"❌ AI 赛道映射发生错误: {e}")
