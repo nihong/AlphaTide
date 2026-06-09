@@ -51,7 +51,10 @@ class BullwhipEngine:
         4. 两段式漏斗：本地代码初筛关键词 -> 提纯后送入大模型精读。
         """
         logger.info("📚 [Cross-Verify 2/4] 启动两段式漏斗与【白名单过滤】，抓取顶级机构深度底稿...")
-        shortage_keywords = ["供需错配", "产能出清", "扩产壁垒", "长鞭效应", "结构性缺货", "资本开支见底"]
+        shortage_keywords = [
+            "供需错配", "产能出清", "扩产壁垒", "长鞭效应", "结构性缺货", "资本开支见底",
+            "供不应求", "库存告急", "订单外溢", "提价函", "涨价预期", "满产满销", "交期延长"
+        ]
         
         # 顶级权威机构白名单 (防止被野鸡研报和付费吹票误导)
         top_tier_institutions = ["中金公司", "中信证券", "华泰证券", "广发证券", "招商证券", "国泰君安", "海通证券", "天风证券"]
@@ -75,11 +78,12 @@ class BullwhipEngine:
             return []
 
         try:
-            # 过滤1：时间窗过滤
+            # 过滤1：时间窗过滤 (包含近 3 天的最新报告)
             if '日期' in report_df.columns:
                 report_df['日期'] = pd.to_datetime(report_df['日期'])
                 now = pd.Timestamp.now()
-                mask = (report_df['日期'] <= now - pd.Timedelta(days=3)) & (report_df['日期'] >= now - pd.Timedelta(days=90))
+                # 去除 days=3 的延迟，允许拉取最新的突发研报
+                mask = (report_df['日期'] <= now) & (report_df['日期'] >= now - pd.Timedelta(days=90))
                 filtered_df = report_df[mask]
             else:
                 filtered_df = report_df.head(200)
