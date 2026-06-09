@@ -43,6 +43,7 @@
 *   **Git 提交规范**：**所有 Git 提交记录（Commit Message）必须强制使用全中文描述**（例如：`git commit -m "特性: 增加多源验证机制"`），严禁使用英文描述，以确保团队查阅的历史记录完全无语言障碍。
 *   **大模型调用规范 (Antigravity First)**：DeepSeek 或其他大模型的相关任务，必须**优先使用 Antigravity 原生框架或其插件生态（Plugins/Agents）完成**。严禁在纯业务代码中硬编码发裸请求，必须确保 AI 调度与业务逻辑解耦，保持极高的可扩展性。
 *   **战报生成绝对纪律 (Report Generation Policy)**：任何 AI 在生成个股分析战报或实盘跑批总结时，**严禁自行发挥排版**！必须首先读取 `reports/REPORT_TEMPLATE.md` 文件，严格按照其设定的五大模块结构生成。
+    *   **存储路径约束**：所有生成的 `.md` 战报必须强制写入到当前项目的工作区 `reports/` 目录下（例如：`AlphaTide/reports/`），严禁将其作为 Artifact 生成在 AI 的私有脑区（`.gemini/brain/`）中。
     *   **文件名命名规范**：`YYYYMMDD_状态灯_行业_公司_代码.md` (严禁使用英文缩写)。
     *   **状态灯规则**：
         *   🔴 (红灯)：各方面指标走坏，或彻底被风控否决的标的 (Pass)。
