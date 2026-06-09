@@ -16,16 +16,47 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def check_macro_environment() -> bool:
+    """
+    大盘环境风控锁 (Macro Market Risk Lock) - 抵御系统性流动性危机
+    逻辑：当沪深300指数跌破 20 日均线时，代表大盘进入主跌浪或流动性枯竭。
+    此时任何个股的 VCP 形态都有极大概率被大盘恐慌盘砸穿，系统必须强行熔断休眠。
+    """
+    logger.info("🛡️ [风控中心] 正在执行系统性流动性危机排查 (沪深300指数)...")
+    try:
+        import akshare as ak
+        df = ak.stock_zh_index_daily_em(symbol="sh000300")
+        if df.empty or len(df) < 20:
+            return True
+            
+        current_close = df['close'].iloc[-1]
+        ma_20 = df['close'].iloc[-20:].mean()
+        
+        if current_close < ma_20:
+            logger.error(f"☠️ [SYSTEM HALT] 沪深300当前点位 ({current_close:.2f}) 跌破 20日生命线 ({ma_20:.2f})！")
+            logger.error("🛑 系统判定当前存在【系统性流动性危机】。覆巢之下无完卵，AlphaTide V8.0 强制熔断，停止一切多头买入操作！")
+            return False
+            
+        logger.info(f"✅ [大盘风控通过] 沪深300 ({current_close:.2f}) 稳居 20日均线 ({ma_20:.2f}) 之上，未见流动性衰竭。")
+        return True
+    except Exception as e:
+        logger.warning(f"⚠️ 无法获取大盘数据 (通常因本地 VPN 导致)。暂且降级跳过宏观风控锁。异常: {e}")
+        return True
+
 def run_bullwhip_pipeline():
+    # 【新增：大盘熔断锁】
+    if not check_macro_environment():
+        return
+
     print("==================================================")
-    print(f"🌊 ALPHATIDE V7.3 (Triangulation Engine) - {datetime.now().strftime('%Y-%m-%d')}")
+    print(f"🌊 ALPHATIDE V8.0 (Super Early Radar) - {datetime.now().strftime('%Y-%m-%d')}")
     print("==================================================")
     
     validator = IndustryValidator()
     bullwhip = BullwhipEngine()
 
     # 第一步：穿透获取全市场最新研报 (获取近 24 小时的深度研报)
-    logger.info("正在执行 V7.3 第一步：穿透提取东方财富全市场研报库...")
+    logger.info("正在执行 V8.0 第一步：穿透提取东方财富全市场研报库...")
     try:
         latest_reports = validator.scan_broker_reports() 
     except Exception as e:
@@ -33,7 +64,7 @@ def run_bullwhip_pipeline():
         latest_reports = []
 
     # 第二步：利用大模型执行“多源三角验证”
-    logger.info("正在执行 V7.3 第二步：启动多源交叉验证提取卡脖子环节...")
+    logger.info("正在执行 V8.0 第二步：启动多源交叉验证提取卡脖子环节...")
     bottleneck_sectors = bullwhip.scan_bottleneck_industries(latest_reports)
     
     if not bottleneck_sectors:
@@ -43,7 +74,7 @@ def run_bullwhip_pipeline():
     logger.info(f"🔥 锁定多源印证赛道: {bottleneck_sectors}")
 
     # 第三步：在赛道中寻找“第一基底龙头”
-    logger.info("正在执行 V7.3 第三步：在目标赛道中锁定量价与财务共振的绝对龙头...")
+    logger.info("正在执行 V8.0 第三步：在目标赛道中锁定量价与财务共振的绝对龙头...")
     # 系统根据赛道自动映射 A 股标的 (此处为映射后的代码，包含被动元件与液冷)
     target_symbols = ["sz300408", "sz000636", "sz002837"] # 三环集团, 风华高科, 英维克
     
