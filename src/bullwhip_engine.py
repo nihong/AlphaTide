@@ -263,30 +263,32 @@ class BullwhipEngine:
 
     def screen_apex_predators(self, symbols: List[str], target_date: str = None) -> List[Dict]:
         """
-        全自动真实量价第一基底扫描 + 财务真伪核验
+        全自动真实量价第一基底扫描 + 财务真伪核验 (支持并发架构提升效率)
         """
-        logger.info(f"🦅 [Bullwhip Engine] 正在对标的池进行【量价VCP + 财务印证】双重审核...")
+        logger.info(f"🦅 [Bullwhip Engine] 正在对标的池进行【量价VCP + 财务印证】双重审核 (启动多线程并发)...")
         apex_predators = []
         
-        for sym in symbols:
+        import concurrent.futures
+
+        def process_symbol(sym):
             try:
                 df = fetch_a_stock_hist_cached(sym, period="daily")
-                if df is None or df.empty or len(df) < 100: continue
+                if df is None or df.empty or len(df) < 100: return None
                 
                 current_price = df['收盘'].iloc[-1]
                 recent_60d_high = df['最高'].iloc[-60:].max()
                 year_low = df['最低'].iloc[-200:].min() if len(df) >= 200 else df['最低'].min()
                 
-                if recent_60d_high > year_low * 2.5: continue 
+                if recent_60d_high > year_low * 2.5: return None 
                     
                 momentum_20d = (current_price / df['收盘'].iloc[-20]) - 1
-                if momentum_20d < -0.10: continue 
+                if momentum_20d < -0.10: return None 
                     
                 recent_10d_volatility = df['收盘'].iloc[-10:].std()
                 past_30d_volatility = df['收盘'].iloc[-40:-10].std()
                 
-                if pd.isna(recent_10d_volatility) or pd.isna(past_30d_volatility) or past_30d_volatility == 0: continue
-                if recent_10d_volatility > past_30d_volatility * 0.85: continue 
+                if pd.isna(recent_10d_volatility) or pd.isna(past_30d_volatility) or past_30d_volatility == 0: return None
+                if recent_10d_volatility > past_30d_volatility * 0.85: return None 
                 
                 # 触发财务底牌与极早期指标验证 (V8.0)
                 is_financial_solid = self.verify_financial_explosion(sym)
@@ -294,18 +296,26 @@ class BullwhipEngine:
                 
                 if not (is_financial_solid and is_leading_solid):
                     logger.info(f"🚫 {sym} 财务印证或极早期先导指标未通过，拒绝列为龙头。")
-                    continue
+                    return None
                     
-                apex_predators.append({
+                return {
                     "symbol": sym,
                     "current_price": current_price,
                     "momentum": round(momentum_20d * 100, 2),
                     "vcp_status": "Stage 2 First Base (VCP Tight)",
                     "reason": "V8.0 特早雷达通过: 现货/研报/财务/缩表/量价全部共振"
-                })
+                }
             except Exception as e:
                 logger.debug(f"标的 {sym} 计算失败: {e}")
+                return None
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            results = executor.map(process_symbol, symbols)
             
+        for res in results:
+            if res:
+                apex_predators.append(res)
+                
         return apex_predators
 
     def evaluate_exit(self, symbol: str, entry_price: float, highest_price: float) -> bool:

@@ -26,9 +26,9 @@ class AIAnalyst:
         """调用 AI 模型进行深度分析 (Antigravity SDK)"""
         return asyncio.run(self._async_analyze_with_llm(prompt))
 
-    def map_sectors_to_symbols(self, sectors, universe):
-        """利用大模型将瓶颈行业映射到具体的 A 股龙头标的"""
-        return asyncio.run(self._async_map_sectors_to_symbols(sectors, universe))
+    def map_sectors_to_symbols(self, sectors):
+        """利用大模型将瓶颈行业直接映射到具体的 A 股核心标的"""
+        return asyncio.run(self._async_map_sectors_to_symbols(sectors))
 
     async def _async_analyze_with_llm(self, prompt):
         system_instruction = (
@@ -50,10 +50,10 @@ class AIAnalyst:
         except Exception as e:
             return f"❌ AI 分析发生错误: {e}"
 
-    async def _async_map_sectors_to_symbols(self, sectors, universe):
+    async def _async_map_sectors_to_symbols(self, sectors):
         system_instruction = (
             "你是一位资深的A股行业研究员。你需要根据给定的目标赛道（如缺货涨价的细分行业），"
-            "从给定的强势股票池中，挑选出最符合这些赛道的龙头公司。"
+            "直接列出这些赛道在A股市场中最正宗、最核心的龙头上市公司的股票代码与名称。"
         )
         
         config = LocalAgentConfig(
@@ -61,16 +61,11 @@ class AIAnalyst:
             response_schema=TargetList
         )
         
-        # 限制传入的股票池数量，避免超过 token 限制
-        # 如果池子太大，可以只传前 200 个，这里假设 universe 已经清洗过了
-        universe_str = "\n".join([f"{item['代码']}: {item['名称']}" for item in universe[:300]])
-        
         prompt = (
-            f"以下是当前市场经过量价清洗后的强势股票池（前300只）：\n"
-            f"{universe_str}\n\n"
             f"目标赛道（牛鞭效应/供应链瓶颈）：{sectors}\n\n"
-            f"请从上述股票池中，挑选出属于这些目标赛道的公司。如果不存在符合条件的，请返回空列表。\n"
-            f"请简述选择该公司的核心理由（例如它在该赛道的核心产品或地位）。"
+            f"请直接列出属于这些目标赛道的 A股核心上市公司代码（必须带有 sh/sz 前缀，如 sz300408 或 sh600519）。\n"
+            f"不要遗漏处于早期的核心标的。每个赛道请列出大约 5-10 只最正宗的核心龙头股。\n"
+            f"请简述选择该公司的核心理由（必须包含它的具体主营业务，以证明它与该赛道完全契合）。"
         )
         
         try:
