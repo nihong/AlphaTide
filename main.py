@@ -112,8 +112,8 @@ def run_bullwhip_pipeline():
         # 只保留既在 AI 选出的行业龙头中，又位于全市场前 10% 动量的标的
         valid_targets = [t for t in target_symbols if t.get('symbol', '').replace('sh', '').replace('sz', '') in core_symbols]
     else:
-        logger.warning("⚠️ 底池清洗失败，降级放行所有 AI 标的 (依靠单票动量过滤)。")
-        valid_targets = target_symbols
+        logger.error("☠️ [SYSTEM HALT] 底池清洗失败或无满足 RPS>90 的标的。实盘环境严禁降级放行！强制触发交易熔断。")
+        raise RuntimeError("实盘核心前置条件(RPS过滤)缺失，为了账户安全，系统终止运行。")
         
     if not valid_targets:
         logger.warning("🛑 映射标的均未达到全市场 RPS 动量前 10% 强度！这说明行业尚未爆发，坚决不买左侧！")
