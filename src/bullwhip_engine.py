@@ -255,11 +255,15 @@ class BullwhipEngine:
         
         请提取出 3 个相互印证度最高的“牛鞭效应”行业。若无法交叉印证，请返回空列表。
         """
-        # ai_result = self.ai.analyze_with_llm(prompt)
+        # 动态调用大模型提取交叉印证度最高的行业
+        ai_sectors = self.ai.extract_bottleneck_sectors(prompt)
         
-        # 鲁棒性保底池
-        base_pool = ["高端被动元件(MLCC)", "液冷服务器", "HBM封装"]
-        return list(set(base_pool + commodities))
+        if not ai_sectors:
+            logger.warning("⚠️ 多维交叉验证失败，未发现明确的牛鞭效应行业，启动硬编码鲁棒性保底池作为降级方案...")
+            base_pool = ["高端被动元件(MLCC)", "液冷服务器", "HBM封装"]
+            return list(set(base_pool + commodities))
+            
+        return list(set(ai_sectors + commodities))
 
     def screen_apex_predators(self, symbols: List[str], target_date: str = None) -> List[Dict]:
         """

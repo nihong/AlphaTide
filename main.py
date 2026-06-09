@@ -103,7 +103,23 @@ def run_bullwhip_pipeline():
         
     logger.info(f"🎯 AI 成功映射赛道核心标的: {target_symbols}")
     
-    apex_predators = bullwhip.screen_apex_predators(target_symbols)
+    # 3.2 恢复全市场 RPS 动量断头台过滤 (绝对强度风控)
+    logger.info("🛡️ 正在拉取全市场 RPS>90 的高动量股票池进行绝对强度交集计算...")
+    screener = UniverseScreener()
+    core_universe = screener.filter_universe()
+    if core_universe:
+        core_symbols = [item['代码'] for item in core_universe]
+        # 只保留既在 AI 选出的行业龙头中，又位于全市场前 10% 动量的标的
+        valid_targets = [sym for sym in target_symbols if sym.replace('sh', '').replace('sz', '') in core_symbols]
+    else:
+        logger.warning("⚠️ 底池清洗失败，降级放行所有 AI 标的 (依靠单票动量过滤)。")
+        valid_targets = target_symbols
+        
+    if not valid_targets:
+        logger.warning("🛑 映射标的均未达到全市场 RPS 动量前 10% 强度！这说明行业尚未爆发，坚决不买左侧！")
+        return
+
+    apex_predators = bullwhip.screen_apex_predators(valid_targets)
     
     if not apex_predators:
         logger.warning("🛑 赛道中未发现满足量价动量且 VCP 波动率收缩完美的龙头，继续潜伏等待右侧突破...")

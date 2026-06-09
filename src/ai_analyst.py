@@ -10,6 +10,9 @@ except ImportError:
 
 import pydantic
 
+class SectorList(pydantic.BaseModel):
+    sectors: list[str]
+
 class TargetStock(pydantic.BaseModel):
     symbol: str
     name: str
@@ -25,6 +28,10 @@ class AIAnalyst:
     def analyze_with_llm(self, prompt):
         """调用 AI 模型进行深度分析 (Antigravity SDK)"""
         return asyncio.run(self._async_analyze_with_llm(prompt))
+
+    def extract_bottleneck_sectors(self, prompt):
+        """调用 AI 模型提取相互印证度最高的牛鞭效应行业"""
+        return asyncio.run(self._async_extract_bottleneck_sectors(prompt))
 
     def map_sectors_to_symbols(self, sectors):
         """利用大模型将瓶颈行业直接映射到具体的 A 股核心标的"""
@@ -49,6 +56,26 @@ class AIAnalyst:
                 return await response.text()
         except Exception as e:
             return f"❌ AI 分析发生错误: {e}"
+
+    async def _async_extract_bottleneck_sectors(self, prompt):
+        system_instruction = (
+            "你是一位严谨的宏观产业分析师。你需要从给定的四维交叉验证数据中，提取出相互印证度最高的'牛鞭效应'或'供应链短缺'的行业名称。"
+            "如果没有足够的交叉印证数据，请返回空列表。"
+        )
+        config = LocalAgentConfig(
+            system_instruction=system_instruction,
+            response_schema=SectorList
+        )
+        try:
+            async with Agent(config) as agent:
+                response = await agent.chat(prompt)
+                data = await response.structured_output()
+                if data:
+                    return data['sectors']
+                return []
+        except Exception as e:
+            print(f"❌ AI 行业提取发生错误: {e}")
+            return []
 
     async def _async_map_sectors_to_symbols(self, sectors):
         system_instruction = (
