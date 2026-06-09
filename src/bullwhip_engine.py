@@ -29,9 +29,10 @@ class BullwhipEngine:
         [验证维度一：物理世界现货] 提取大宗商品现货与期货异常涨跌幅
         接口: futures_zh_spot (新浪期货现货)
         """
-        logger.info("⚡ [Cross-Verify 1/4] 正在抓取现货与大宗商品市场价格...")
+        logger.info("⚡ [Cross-Verify 1/4] 正在抓取现货与大宗商品市场价格 (启动新浪+同花顺双重灾备)...")
         alerts = []
         try:
+            # 优先尝试新浪大宗现货 (近期因 HTML 改版可能抛出 Length mismatch 异常)
             df_spot = ak.futures_zh_spot(symbol="买卖", market="CF", adjust='0')
             if not df_spot.empty and '涨跌幅' in df_spot.columns:
                 abnormal = df_spot[df_spot['涨跌幅'] > 3.0] 
@@ -39,8 +40,19 @@ class BullwhipEngine:
                     alerts.append(f"{row['品种']}(涨幅:{row['涨跌幅']}%)")
             return alerts[:5]
         except Exception as e:
-            logger.warning(f"⚠️ 现货 API 抓取失败: {e}")
-            return []
+            logger.warning(f"⚠️ 新浪现货 API 抓取失败 ({e})，立即切换至同花顺产业异动备用源...")
+            try:
+                # 备选方案：同花顺行业板块异动 (如果大宗商品暴涨，对应开采/制造板块必定暴涨)
+                ths_df = ak.stock_board_industry_name_ths()
+                if not ths_df.empty and '涨跌幅' in ths_df.columns:
+                    # 抓取涨幅排名前 3 的核心板块作为现货暴涨的映射
+                    top_boards = ths_df.sort_values(by='涨跌幅', ascending=False).head(3)
+                    for _, row in top_boards.iterrows():
+                        alerts.append(f"{row.get('板块', '未知板块')}(板块异动:{row.get('涨跌幅', 0)}%)")
+                return alerts
+            except Exception as ex:
+                logger.error(f"❌ 同花顺备用源亦失效: {ex}")
+                return []
 
     def scan_structural_industry_reports(self) -> List[str]:
         """
