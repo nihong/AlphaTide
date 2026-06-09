@@ -10,7 +10,7 @@ POOL_FILE = "validated_sectors.json"
 class IndustryValidator:
     def __init__(self):
         self.pool_file = POOL_FILE
-        self.cache_file = "parsed_reports_cache.json"
+        self.cache_file = ".cache/parsed_reports_cache.json"
         self.active_sectors = self._load_pool()
         self.parsed_reports = self._load_cache()
         
