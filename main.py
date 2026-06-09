@@ -18,29 +18,46 @@ logger = logging.getLogger(__name__)
 
 def check_macro_environment() -> bool:
     """
-    大盘环境风控锁 (Macro Market Risk Lock) - 抵御系统性流动性危机
-    逻辑：当沪深300指数跌破 20 日均线时，代表大盘进入主跌浪或流动性枯竭。
-    此时任何个股的 VCP 形态都有极大概率被大盘恐慌盘砸穿，系统必须强行熔断休眠。
+    大盘环境风控锁 V8.1 (双轨广度防御系统)
+    解决沪深300失真问题：同时监控【沪深300(大盘价值)】与【中证1000(中小盘成长)】。
+    只要有任意一个指数稳在 20日均线之上，就判定存在“结构性多头环境”，允许机器运作。
+    只有当两个指数全部跌破 20日均线时，才确认发生全市场系统性股灾，全面断电熔断。
     """
-    logger.info("🛡️ [风控中心] 正在执行系统性流动性危机排查 (沪深300指数)...")
+    logger.info("🛡️ [风控中心] 正在执行系统性流动性排查 (启动沪深300+中证1000双轨防御)...")
     try:
         import akshare as ak
-        df = ak.stock_zh_index_daily_em(symbol="sh000300")
-        if df.empty or len(df) < 20:
+        # 拉取沪深300 (代表大盘权重)
+        df_300 = ak.stock_zh_index_daily_em(symbol="sh000300")
+        # 拉取中证1000 (代表中小盘科技与成长)
+        df_1000 = ak.stock_zh_index_daily_em(symbol="sh000852")
+        
+        if df_300.empty or df_1000.empty or len(df_300) < 20 or len(df_1000) < 20:
             return True
             
-        current_close = df['close'].iloc[-1]
-        ma_20 = df['close'].iloc[-20:].mean()
+        c_300 = df_300['close'].iloc[-1]
+        ma_300 = df_300['close'].iloc[-20:].mean()
         
-        if current_close < ma_20:
-            logger.error(f"☠️ [SYSTEM HALT] 沪深300当前点位 ({current_close:.2f}) 跌破 20日生命线 ({ma_20:.2f})！")
-            logger.error("🛑 系统判定当前存在【系统性流动性危机】。覆巢之下无完卵，AlphaTide V8.0 强制熔断，停止一切多头买入操作！")
+        c_1000 = df_1000['close'].iloc[-1]
+        ma_1000 = df_1000['close'].iloc[-20:].mean()
+        
+        is_300_safe = c_300 >= ma_300
+        is_1000_safe = c_1000 >= ma_1000
+        
+        if not is_300_safe and not is_1000_safe:
+            logger.error(f"☠️ [SYSTEM HALT] 沪深300({c_300:.2f} < {ma_300:.2f}) 与 中证1000({c_1000:.2f} < {ma_1000:.2f}) 双双破位！")
+            logger.error("🛑 大盘权重与中小盘科技全线崩塌，确认发生系统性股灾。AlphaTide 强制熔断休眠！")
             return False
             
-        logger.info(f"✅ [大盘风控通过] 沪深300 ({current_close:.2f}) 稳居 20日均线 ({ma_20:.2f}) 之上，未见流动性衰竭。")
+        if is_300_safe and not is_1000_safe:
+            logger.info("⚠️ [结构性行情] 沪深300安全，但中小盘走弱。系统放行，切换为【权重防御模式】。")
+        elif not is_300_safe and is_1000_safe:
+            logger.info("🔥 [结构性牛市] 沪深300走弱，但中证1000活跃！无视指数失真，系统放行，开启【科技成长狙击模式】！")
+        else:
+            logger.info("✅ [全量牛市] 两大核心指数均稳居生命线之上，市场广度极佳！")
+            
         return True
     except Exception as e:
-        logger.warning(f"⚠️ 无法获取大盘数据 (通常因本地 VPN 导致)。暂且降级跳过宏观风控锁。异常: {e}")
+        logger.warning(f"⚠️ 无法获取大盘数据 (降级跳过宏观风控锁)。异常: {e}")
         return True
 
 def run_bullwhip_pipeline():
