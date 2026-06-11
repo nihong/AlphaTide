@@ -5,5 +5,4 @@ openpyxl
 lxml
 python-dotenv
 pydantic
-google-antigravity
 pytest
